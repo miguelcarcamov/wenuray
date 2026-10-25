@@ -89,7 +89,7 @@ Ask for one by name, e.g. *"use the feature-dev skill for issue #65"*.
   writable `HOME` on first import. Where it can't import natively, run CASA tests in the image:
 
   ```bash
-  docker run --rm -v $PWD:/src:ro -e HOME=/tmp -e SETUPTOOLS_SCM_PRETEND_VERSION=0.0.dev0 \
+  docker run --rm -v $PWD:/src:ro -e HOME=/tmp -e SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WENURAY=0.0.dev0 \
     ghcr.io/miguelcarcamov/wenuray:base bash -c \
     "cp -r /src /tmp/wenuray && cd /tmp/wenuray && pip install -q -e '.[test]' && pytest tests -q"
   ```
