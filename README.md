@@ -347,13 +347,17 @@ the solve, the apply and the image alike.
   and options (`max_iter`, `mask_mode`, ...). Each reconstruction runs in a separate process,
   since Pyralysis's casacore and CASA's can't share one. **Give it a mask** (`mask_mode="file"`,
   `mask_path=...`): a model free in every pixel can absorb the gain errors self-calibration
-  should solve for. Wenuray needs Pyralysis 3.1.0 or later (3.0.0's fit reads `DATA` instead of
-  `CORRECTED_DATA`); PyPI only has older versions, so install it from its release tag:
+  should solve for. Wenuray needs Pyralysis 3.2.1 or later, from PyPI; its
+  `ska-ost-array-config` dependency comes from SKA's index:
 
   ```bash
-  pip install "wenuray[pyralysis]" "pyralysis @ git+https://gitlab.com/clirai/pyralysis.git@v3.1.0" \
+  pip install "wenuray[pyralysis]" \
     --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
   ```
+
+  A `Selection(uvrange=...)` works with Pyralysis in metres or km (e.g. `"<3090m"`, the form the
+  Nyquist check suggests); a range in wavelengths is refused, since it depends on each channel's
+  frequency.
 
   Numba needs OpenMP's runtime (`libgomp1`, present on most systems and in Wenuray's images) or TBB
   for Pyralysis's parallel kernels; Wenuray checks for it when the imager is created.

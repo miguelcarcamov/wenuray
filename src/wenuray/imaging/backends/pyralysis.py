@@ -23,6 +23,7 @@ import functools
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import warnings
@@ -31,7 +32,7 @@ from importlib import metadata
 from types import MappingProxyType
 from typing import Mapping, Sequence, Tuple
 
-from casatools import ms, table
+from casatools import ms
 
 from ... import recipe
 from ...config import ImageGeometry, Selection, Weighting, updated
@@ -205,7 +206,6 @@ class Pyralysis(Imager):
             # Pyralysis and Dask may write scratch files in the working directory
             cwd=os.path.dirname(os.path.abspath(request.name)),
         )
-        _remove_residual_column(request.ms)
         return ImagingResult(outputs["restored"], outputs["residual"], outputs["model"])
 
 
@@ -240,6 +240,8 @@ def _run(request: dict, cwd: str = None) -> None:
             )
         )
     message = reply.get("error") or process.stderr.strip()[-2000:]
+    if reply.get("error", "").startswith("PyralysisVersionError"):
+        raise ImportError(message.split(": ", 1)[1])
     if reply.get("error", "").startswith("ThreadingLayerError"):
         raise RuntimeError(message.split(": ", 1)[1])
     if request.get("check"):
@@ -247,39 +249,74 @@ def _run(request: dict, cwd: str = None) -> None:
     raise RuntimeError("Pyralysis failed (exit code {0}): {1}".format(process.returncode, message))
 
 
-def _remove_residual_column(ms_name: str) -> None:
-    """
-    Pyralysis also writes RESIDUAL_DATA, which self-calibration doesn't use. Removed here, after the
-    worker has closed the measurement set
-    """
-    table_tool = table()
-    table_tool.open(ms_name, nomodify=False)
-    try:
-        if "RESIDUAL_DATA" in table_tool.colnames():
-            table_tool.removecols("RESIDUAL_DATA")
-    finally:
-        table_tool.close()
-        table_tool.done()
-
-
 def _taql(ms_name: str, selection: Selection) -> str:
     """
-    The TaQL selection of the request's field and spectral windows
+    The TaQL selection of the request's field, spectral windows and uv range
     """
+    conditions = []
+    if selection.field or selection.spw:
+        ms_tool = ms()
+        try:
+            indices = ms_tool.msseltoindex(vis=ms_name, field=selection.field, spw=selection.spw)
+        finally:
+            ms_tool.done()
+        conditions += [
+            "{0} IN [{1}]".format(column, ",".join(str(int(i)) for i in ids))
+            for column, ids in (("FIELD_ID", indices["field"]), ("DATA_DESC_ID", indices["dd"]))
+            if len(ids)
+        ]
     if selection.uvrange:
-        raise ValueError(
-            "The Pyralysis imager can't select a uvrange yet (pyralysis#358); use field/spw"
-        )
-    if not selection.field and not selection.spw:
-        return ""
-    ms_tool = ms()
-    try:
-        indices = ms_tool.msseltoindex(vis=ms_name, field=selection.field, spw=selection.spw)
-    finally:
-        ms_tool.done()
-    conditions = [
-        "{0} IN [{1}]".format(column, ",".join(str(int(i)) for i in ids))
-        for column, ids in (("FIELD_ID", indices["field"]), ("DATA_DESC_ID", indices["dd"]))
-        if len(ids)
-    ]
+        conditions.append(uvrange_taql(selection.uvrange))
     return " AND ".join(conditions)
+
+
+# Units of a uv range in metres
+UVRANGE_UNITS = {"": 1.0, "m": 1.0, "km": 1e3}
+UVRANGE_PATTERN = re.compile(
+    r"^\s*(?P<below><)?(?P<above>>)?\s*(?P<low>[0-9.eE+-]+)\s*(?:~\s*(?P<high>[0-9.eE+-]+))?"
+    r"\s*(?P<unit>[a-zA-Z]*)\s*$"
+)
+# The projected baseline length, sqrt(u² + v²). Pyralysis reads with python-casacore, whose TaQL
+# indexes arrays from 0
+BASELINE_LENGTH = "SQRT(SQUARE(UVW[0]) + SQUARE(UVW[1]))"
+
+
+def uvrange_taql(uvrange: str) -> str:
+    """
+    A CASA uv range in metres ("<3090m", ">0.5km", "100~2000m", or several separated by commas)
+    as a TaQL condition on UVW
+
+    Raises
+    ------
+    ValueError
+        If the range isn't in metres: a range in wavelengths depends on each channel's frequency,
+        which a selection of rows can't apply
+    """
+    ranges = []
+    for part in filter(str.strip, uvrange.split(",")):
+        match = UVRANGE_PATTERN.match(part)
+        unit = match.group("unit") if match else ""
+        if match is None or unit not in UVRANGE_UNITS:
+            raise ValueError(
+                "The Pyralysis imager takes a uvrange in metres or km (e.g. '<3090m', '100~2000m'), "
+                "not {0!r}: a range in wavelengths depends on each channel's frequency, which a "
+                "selection of rows can't apply".format(part.strip())
+            )
+        scale = UVRANGE_UNITS[unit]
+        low = float(match.group("low")) * scale
+        if match.group("high") is not None:
+            if match.group("below") or match.group("above"):
+                raise ValueError("Invalid uvrange {0!r}".format(part.strip()))
+            high = float(match.group("high")) * scale
+            ranges.append("({0} >= {1!r} AND {0} <= {2!r})".format(BASELINE_LENGTH, low, high))
+        elif match.group("below"):
+            ranges.append("{0} < {1!r}".format(BASELINE_LENGTH, low))
+        elif match.group("above"):
+            ranges.append("{0} > {1!r}".format(BASELINE_LENGTH, low))
+        else:
+            raise ValueError(
+                "Invalid uvrange {0!r}: use '<x', '>x' or 'a~b', in m or km".format(part.strip())
+            )
+    if not ranges:
+        raise ValueError("Empty uvrange {0!r}".format(uvrange))
+    return ranges[0] if len(ranges) == 1 else "(" + " OR ".join(ranges) + ")"

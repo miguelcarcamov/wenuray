@@ -28,7 +28,6 @@ def worker(monkeypatch):
         )
 
     monkeypatch.setattr(backend.subprocess, "run", run)
-    monkeypatch.setattr(backend, "_remove_residual_column", mock.Mock())
     backend._check.cache_clear()
     return state
 
@@ -144,7 +143,6 @@ class TestReconstruct:
         assert call.request["outputs"]["model"] == name + ".model.fits"
         assert call.cwd == str(tmp_path)  # scratch files stay out of the working directory
         assert (result.restored, result.model) == (name + ".image.fits", name + ".model.fits")
-        backend._remove_residual_column.assert_called_once_with("target.ms")
 
     def test_failures_raise_with_the_workers_message(self, worker, monkeypatch, tmp_path):
         monkeypatch.setattr(backend, "_taql", lambda ms, selection: "")
@@ -171,9 +169,59 @@ class TestReconstruct:
         with pytest.raises(RuntimeError, match="^Pyralysis needs.*libgomp1"):
             imager()
 
-    def test_uvrange_selection_is_not_supported_yet(self):
-        with pytest.raises(ValueError, match="uvrange"):
-            backend._taql("target.ms", Selection(uvrange=">10klambda"))
+    def test_an_old_pyralysis_says_which_version_is_needed(self, worker):
+        worker.reply, worker.returncode = {
+            "error": "PyralysisVersionError: The Pyralysis imager needs Pyralysis 3.2.1 or later "
+            "(found 3.1.0): pip install 'wenuray[pyralysis]'"
+        }, 1
+
+        with pytest.raises(ImportError, match=r"^The Pyralysis imager needs Pyralysis 3\.2\.1"):
+            imager()
 
     def test_no_selection_selects_everything(self):
         assert backend._taql("target.ms", Selection()) == ""
+
+
+LENGTH = backend.BASELINE_LENGTH
+
+
+class TestUvrangeSelection:
+    """A uvrange in metres becomes TaQL on UVW, which Pyralysis's LoadData applies (#80)."""
+
+    @pytest.mark.parametrize(
+        "uvrange, taql", [
+            ("<3090m", LENGTH + " < 3090.0"),
+            (">0.5km", LENGTH + " > 500.0"),
+            ("100~2000", "(" + LENGTH + " >= 100.0 AND " + LENGTH + " <= 2000.0)"),
+            (
+                "<100m, >2km",
+                "(" + LENGTH + " < 100.0 OR " + LENGTH + " > 2000.0)",
+            ),
+        ]
+    )
+    def test_ranges_in_metres(self, uvrange, taql):
+        assert backend.uvrange_taql(uvrange) == taql
+
+    @pytest.mark.parametrize("uvrange", [">10klambda", "<5Mlambda", "0~3lambda"])
+    def test_wavelengths_are_refused_with_the_reason(self, uvrange):
+        with pytest.raises(ValueError, match="metres.*frequency"):
+            backend.uvrange_taql(uvrange)
+
+    @pytest.mark.parametrize("uvrange", ["3090m", "<1~2m", "", " , "])
+    def test_invalid_ranges(self, uvrange):
+        with pytest.raises(ValueError):
+            backend.uvrange_taql(uvrange)
+
+    def test_it_joins_the_field_and_spw_selection(self, monkeypatch):
+        tool = mock.Mock()
+        tool.msseltoindex.return_value = {"field": [0], "dd": [1, 2]}
+        monkeypatch.setattr(backend, "ms", lambda: tool)
+
+        taql = backend._taql("target.ms", Selection(field="t", spw="1~2", uvrange="<3090m"))
+
+        assert taql == "FIELD_ID IN [0] AND DATA_DESC_ID IN [1,2] AND " + LENGTH + " < 3090.0"
+
+    def test_a_uvrange_alone_needs_no_measurement_set(self, monkeypatch):
+        monkeypatch.setattr(backend, "ms", mock.Mock(side_effect=AssertionError("not needed")))
+
+        assert backend._taql("target.ms", Selection(uvrange=">1km")) == LENGTH + " > 1000.0"
