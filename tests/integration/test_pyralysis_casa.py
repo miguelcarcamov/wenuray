@@ -31,7 +31,10 @@ def pyralysis_imager(**options) -> Pyralysis:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)  # no mask: the contract doesn't need one
         return Pyralysis(
-            GEOMETRY, terms=["chi_squared"], optimizer="lbfgsb", max_iter=200, **options
+            GEOMETRY, terms=["chi_squared"], optimizer="lbfgsb", **{
+                "max_iter": 200,
+                **options
+            }
         )
 
 
