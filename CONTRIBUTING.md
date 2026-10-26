@@ -75,6 +75,13 @@ sphinx-build -W -b html docs docs/_build/html   # if you changed docs or docstri
    `rc2`, and so on.
 4. Publish the release itself from the same commit, tagged `vX.Y.Z`. It goes to PyPI and moves the
    `:latest` image.
+5. Merge `master` back into `development` with a merge commit. That brings the release tags into
+   `development`'s history, so its builds are versioned `X.Y.(Z+1).devN` rather than an old tag's.
 
 Versions come from the tag through setuptools-scm, and a release whose tag doesn't match the built
 version fails before uploading.
+
+Each major version is named after a woman who shaped radio astronomy, and its minor and patch
+releases keep the name: 1.x is "Payne-Scott", after Ruby Payne-Scott, who made some of the first
+radio-interferometric observations in 1946. Release titles read `Wenuray X.Y.Z "<Name>"`, and the
+notes of each `X.0.0` open with a short dedication.
