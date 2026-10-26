@@ -56,7 +56,7 @@ Run the narrowest paths first, then the full suite:
 pre-commit run --files <changed files>     # git add new files first
 pytest tests/unit/<area> tests/examples
 # CASA tests where casatools can't import natively (see AGENTS.md):
-docker run --rm -v $PWD:/src:ro -e HOME=/tmp -e SETUPTOOLS_SCM_PRETEND_VERSION=0.0.dev0 \
+docker run --rm -v $PWD:/src:ro -e HOME=/tmp -e SETUPTOOLS_SCM_PRETEND_VERSION_FOR_WENURAY=0.0.dev0 \
   ghcr.io/miguelcarcamov/wenuray:base bash -c \
   "cp -r /src /tmp/wenuray && cd /tmp/wenuray && pip install -q -e '.[test]' && pytest tests -q"
 ```

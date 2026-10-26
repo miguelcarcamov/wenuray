@@ -85,10 +85,10 @@ tclean = "wenuray.imaging.backends.tclean:Tclean"
 [project.optional-dependencies]
 # Only wenuray.selfcalibration.observers.GainPlotObserver needs it
 plots = ["matplotlib>=3.8"]
-# Pyralysis 3.0.0's fit reads DATA, not CORRECTED_DATA (fixed in 3.1.0). PyPI only has older
-# versions: install it from its release tag, as the README shows. It depends on
-# ska-ost-array-config, published on SKA's index.
-pyralysis = ["pyralysis>=3.1.0"]
+# 3.2.1 is the first Pyralysis whose pipeline loads CORRECTED_DATA with a selection and writes
+# MODEL_DATA (#80). It depends on ska-ost-array-config, published on SKA's index:
+# pip install "wenuray[pyralysis]" --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
+pyralysis = ["pyralysis>=3.2.1"]
 # Only wenuray.utils.reproject() needs it; it pulls in dask, zarr and image libraries
 reproject = ["reproject>=0.14"]
 test = ["matplotlib>=3.8", "pytest>=8", "reproject>=0.14"]

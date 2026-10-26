@@ -15,6 +15,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 
 # Wenuray's pyralysis.py lives next to this file and would shadow the pyralysis package
@@ -75,36 +76,17 @@ def parse(options: dict, extra: list) -> argparse.Namespace:
             raise ValueError(lines[-1] if lines else "invalid Pyralysis options") from None
 
 
-def check_corrected(dataset) -> None:
-    """
-    Pyralysis fits DATA when CORRECTED_DATA wasn't loaded; self-calibration must fit the latter
-    """
-    missing = [
-        index for index, subms in enumerate(dataset.ms_list)
-        if "CORRECTED_DATA" not in subms.visibilities.dataset
-    ]
-    if missing:
-        raise ValueError(
-            "CORRECTED_DATA wasn't loaded for partitions {0}; the fit would use DATA".
-            format(missing)
-        )
-
-
 def run(request: dict) -> None:
     from pyralysis.cli.optimization import (
-        build_optimizer, build_pipeline_imager_config, checkpoint_final_model_residuals,
-        normalize_dask_runtime_for_gpu, optimize_kwargs_from_args, parse_dask_runtime_options,
-        parse_terms
+        build_optimizer, build_pipeline_imager_config, normalize_dask_runtime_for_gpu,
+        optimize_kwargs_from_args, parse_dask_runtime_options, parse_terms
     )
-    from pyralysis.io import DaskMS
     from pyralysis.optimization import ObjectiveFunction
     from pyralysis.pipelines.base import Step
     from pyralysis.pipelines.imager import (
-        ImagerContext, ImagerPipeline, SetupDaskCluster, TeardownDaskCluster
-    )
-    from pyralysis.pipelines.imager.steps import (
-        ApplyVisibilityWeighting, ExportOptimizedModel, ExportResults, RestoreImage, SetupImageGrid,
-        SetupMeasurementOperator
+        ApplyVisibilityWeighting, CheckpointModelResiduals, ExportOptimizedModel, ExportResults,
+        ImagerContext, ImagerPipeline, LoadData, RestoreImage, SetupDaskCluster, SetupImageGrid,
+        SetupMeasurementOperator, TeardownDaskCluster
     )
 
     ms, outputs = request["ms"], request["outputs"]
@@ -119,23 +101,13 @@ def run(request: dict) -> None:
         setattr(args, name, Path(getattr(args, name)))
     dask_options = normalize_dask_runtime_for_gpu(parse_dask_runtime_options(args))
     config = build_pipeline_imager_config(args, dask_options.to_pipeline_config())
-
-    # LoadData, with CORRECTED_DATA and the selection, which it can't load yet (pyralysis#358)
-    @dataclass
-    class LoadCorrectedData(Step[ImagerContext]):
-
-        def execute(self, context):
-            read_kwargs = {
-                "array_backend": context.config["array_backend"]
-            } if "array_backend" in context.config else {}
-            context.dataset = DaskMS(input_name=ms, chunks=context.config.get("chunks")).read(
-                columns=["CORRECTED_DATA"],
-                taql_query=request.get("taql") or None,
-                calculate_psf=True,
-                **read_kwargs
-            )
-            check_corrected(context.dataset)
-            return context
+    # Self-calibration fits the calibrated data of the request's selection (LoadData raises if
+    # CORRECTED_DATA isn't loaded), and the next gaincal reads only MODEL_DATA
+    config.update(
+        data_column="CORRECTED_DATA",
+        taql_query=request.get("taql") or None,
+        checkpoint_columns=["MODEL_DATA"],
+    )
 
     @dataclass
     class Reconstruct(Step[ImagerContext]):
@@ -157,32 +129,15 @@ def run(request: dict) -> None:
             context.optimizer = optimizer
             return context
 
-    # The public API for this is pyralysis#359
-    @dataclass
-    class WriteModelData(Step[ImagerContext]):
-
-        def execute(self, context):
-            checkpoint_final_model_residuals(
-                dataset=context.dataset,
-                result=context.image,
-                model_vis=context.measurement_operator,
-                input_path=Path(ms),
-                transient_resources=(
-                    context.objective, context.optimizer, context.measurement_operator
-                ),
-            )
-            context.config["residuals_ready"] = True
-            return context
-
     steps = [
         SetupDaskCluster(),
-        LoadCorrectedData(),
+        LoadData(),
         ApplyVisibilityWeighting(),
         SetupImageGrid(),
         SetupMeasurementOperator(),
         Reconstruct(),
         ExportOptimizedModel(),
-        WriteModelData(),
+        CheckpointModelResiduals(),
         RestoreImage(),
         ExportResults(),
         TeardownDaskCluster(),
@@ -192,6 +147,34 @@ def run(request: dict) -> None:
         ImagerPipeline(steps=steps).run(context)
     finally:
         TeardownDaskCluster().execute(context)
+
+
+# The first Pyralysis whose pipeline loads CORRECTED_DATA with a selection and writes MODEL_DATA
+# (pyralysis#358, #359), leaves visibilities off the uv grid out of fits (#369) and follows the
+# loss's gradient with degridding (#377)
+MINIMUM_PYRALYSIS = (3, 2, 1)
+
+
+class PyralysisVersionError(ImportError):
+    pass
+
+
+def require_pyralysis(minimum: tuple = MINIMUM_PYRALYSIS) -> None:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        found = version("pyralysis")
+    except PackageNotFoundError:
+        found = None
+    numbers = tuple(int(part) for part in re.findall(r"\d+", found or "")[:3])
+    if found is None or numbers < minimum:
+        raise PyralysisVersionError(
+            "The Pyralysis imager needs Pyralysis {0} or later ({1}): pip install "
+            "'wenuray[pyralysis]' --extra-index-url "
+            "https://artefact.skao.int/repository/pypi-internal/simple".format(
+                ".".join(map(str, minimum)), "found " + found if found else "not installed"
+            )
+        )
 
 
 class ThreadingLayerError(RuntimeError):
@@ -233,6 +216,7 @@ def require_thread_safe_numba() -> None:
 def main() -> int:
     request = json.load(sys.stdin)
     try:
+        require_pyralysis()
         require_thread_safe_numba()
         if request.get("check"):
             parse(request["options"], ["--input-path", "check.ms"])
