@@ -78,3 +78,8 @@ sphinx-build -W -b html docs docs/_build/html   # if you changed docs or docstri
 
 Versions come from the tag through setuptools-scm, and a release whose tag doesn't match the built
 version fails before uploading.
+
+Each major version is named after a woman who shaped radio astronomy, and its minor and patch
+releases keep the name: 1.x is "Payne-Scott", after Ruby Payne-Scott, who made some of the first
+radio-interferometric observations in 1946. Release titles read `Wenuray X.Y.Z "<Name>"`, and the
+notes of each `X.0.0` open with a short dedication.
