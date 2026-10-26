@@ -57,7 +57,7 @@ The redesign is tracked on GitHub (`miguelcarcamov/wenuray`), milestone **"v1.0 
 
 Check the relevant issue before starting work, and reference it in commits and PRs (`Closes #NN`).
 
-Python is `>=3.12,<3.14`: the overlap of the CASA wheels (cp312/cp313) and Pyralysis (`<3.14`) (#30).
+Python is `>=3.11,<3.14`: the overlap of the CASA wheels (cp311 up to CASA 6.7.0, cp312/cp313 after) and Pyralysis (`>=3.11,<3.14`) (#30, #99). `tox` tests each version.
 
 ## Environment
 

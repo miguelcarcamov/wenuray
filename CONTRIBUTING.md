@@ -17,7 +17,8 @@ can be agreed before the code.
 
 ## Development setup
 
-Wenuray needs Python 3.12 or 3.13 (the CASA wheels) on Linux or macOS.
+Wenuray needs Python 3.11, 3.12 or 3.13 (the CASA wheels) on Linux or macOS. `tox` runs the tests
+on each version (`tox.ini`).
 
 ```bash
 python -m venv .venv && . .venv/bin/activate

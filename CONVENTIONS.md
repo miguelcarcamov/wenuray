@@ -26,7 +26,7 @@ The design was set in GitHub issue #22 (milestone "v1.0 redesign"); self-cal wit
 
 ## General principles
 
-- Python version follows `requires-python` in `pyproject.toml`. It is `>=3.12,<3.14`, the overlap of the CASA wheels and Pyralysis (#30).
+- Python version follows `requires-python` in `pyproject.toml`. It is `>=3.11,<3.14`, the overlap of the CASA wheels and Pyralysis (#30, #99).
 - Keep code simple, readable and maintainable; avoid duplication (the three copied self-cal loops are the cautionary example).
 - PEP 8, formatted with `yapf` + `isort` (config in `setup.cfg`, column limit 100), enforced via `pre-commit`.
 - `pytest` for tests. New behaviour needs tests (see `testing.mdc`).
