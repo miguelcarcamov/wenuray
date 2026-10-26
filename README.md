@@ -32,7 +32,8 @@ version 1.0.
 
 ## Requirements
 
-- **Python**: `>=3.12, <3.14`, the versions with both CASA wheels and Pyralysis support
+- **Python**: `>=3.11, <3.14`, the versions with both CASA wheels and Pyralysis support. On 3.11,
+  CASA 6.7.0 is the newest release with wheels; 3.12 and 3.13 get the latest CASA
 - **Dependencies**: casatools, casatasks (CASA >= 6.7), numpy, astropy and reproject. The
   package declares lower bounds; [`requirements.txt`](https://github.com/miguelcarcamov/wenuray/blob/development/requirements.txt) pins the set tested in CI
   and used in the Docker images.
