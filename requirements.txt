@@ -22,7 +22,7 @@ packaging==26.3
 pillow==13.0.0
 pyerfa==2.0.1.5
 pyparsing==3.3.3
-python-dateutil==2.9.0.post0
+python-dateutil==3.0.0
 pyyaml==6.0.3
 scipy==1.18.1
 six==1.17.0
