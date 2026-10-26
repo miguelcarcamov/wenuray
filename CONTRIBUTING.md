@@ -61,3 +61,20 @@ sphinx-build -W -b html docs docs/_build/html   # if you changed docs or docstri
   are solved or applied, how the model is written, or how a round is accepted explains the theory.
 - `development` is the integration branch and `master` the release branch; releases publish to
   PyPI as `wenuray`.
+
+## Releasing
+
+1. Merge `development` into `master` with a merge commit, not a squash, so the two branches keep
+   one history. The release PR lists the issues it closes.
+2. Publish a GitHub pre-release from `master` tagged `vX.Y.ZrcN`, e.g.
+   `gh release create v1.1.0rc1 --target master --prerelease --generate-notes`. The `release`
+   workflow builds the package once, uploads it to TestPyPI as a rehearsal, then to PyPI, and the
+   image workflow pushes `ghcr.io/miguelcarcamov/wenuray:vX.Y.ZrcN`. pip installs a pre-release
+   only when asked: `pip install --pre wenuray`.
+3. Test the candidate from PyPI and from the image. Fix problems on `development` and repeat with
+   `rc2`, and so on.
+4. Publish the release itself from the same commit, tagged `vX.Y.Z`. It goes to PyPI and moves the
+   `:latest` image.
+
+Versions come from the tag through setuptools-scm, and a release whose tag doesn't match the built
+version fails before uploading.
