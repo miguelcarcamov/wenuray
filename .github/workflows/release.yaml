@@ -1,5 +1,7 @@
-# Publishes Wenuray when a GitHub release is published: pre-releases go to TestPyPI, releases to
-# PyPI. The package is built once and the same files are uploaded.
+# Publishes Wenuray when a GitHub release is published. The package is built once, uploaded to
+# TestPyPI as a rehearsal, then the same files go to PyPI. Pre-releases (1.0.0rc1, ...) go to PyPI
+# too: pip only installs them when asked (pip install --pre wenuray), and testers then install them
+# like any release (#90).
 #
 # Uploads use trusted publishing (OIDC), so no API token is stored. Each index needs a trusted
 # publisher for this repository, workflow "release.yaml" and the environment named below:
@@ -45,7 +47,6 @@ jobs:
         path: dist/
 
   testpypi:
-    if: github.event.release.prerelease
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -62,10 +63,10 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         repository-url: https://test.pypi.org/legacy/
+        skip-existing: true  # a re-run, or a version already rehearsed
 
   pypi:
-    if: ${{ !github.event.release.prerelease }}
-    needs: build
+    needs: testpypi  # only after the rehearsal uploaded the same files
     runs-on: ubuntu-latest
     environment:
       name: pypi

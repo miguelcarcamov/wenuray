@@ -52,8 +52,8 @@ On Debian, Ubuntu or Arch, the `manylinux_2_34` casatools wheel that pip picks f
 pip install wenuray
 ```
 
-The package is imported as `wenuray`. (`pip install wenuray` installs an unrelated project.) Until
-the first release is published, install from GitHub instead.
+Release candidates are on PyPI too, and pip installs them only when asked:
+`pip install --pre wenuray`.
 
 ### Option 2: From GitHub
 
