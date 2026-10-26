@@ -1,0 +1,7 @@
+{
+  "build": {
+    "context": "..",
+    "dockerfile": "Dockerfile"
+  },
+  "install": "pip install -e '.[test]' -r docs/requirements.txt pre-commit"
+}

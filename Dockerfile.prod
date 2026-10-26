@@ -1,29 +1,15 @@
-FROM ghcr.io/miguelcarcamov/snow:base
+# BASE_IMAGE lets a locally built base be tested: docker build --build-arg BASE_IMAGE=<tag>
+ARG BASE_IMAGE=ghcr.io/miguelcarcamov/wenuray:base
+FROM ${BASE_IMAGE}
 
-# Install build tools first (smaller, can be cleaned up separately)
-RUN python3 -m pip install --upgrade --no-cache-dir pip wheel setuptools setuptools-scm build && \
-    python3 -m pip cache purge
-
-# Build and install snow with maximum space efficiency
-# Use /tmp/snow-build which we'll clean up immediately after
-RUN WORKDIR=/tmp/snow-build && \
-    mkdir -p $WORKDIR && \
-    cd $WORKDIR && \
-    echo "Cloning snow repository..." && \
-    git clone --depth 1 --single-branch https://github.com/miguelcarcamov/snow.git . && \
-    echo "Building snow package..." && \
-    python3 -m build --wheel && \
-    echo "Installing snow..." && \
-    pip3 install --no-cache-dir $(ls -t dist/*.whl | head -1) && \
-    cd / && \
-    rm -rf $WORKDIR && \
-    python3 -m pip cache purge && \
-    rm -rf /root/.cache/pip /root/.cache/pip-tools /root/.cache/git && \
-    rm -rf /tmp/* /var/tmp/* && \
-    find /usr/local/lib/python3.* -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
-    find /usr/local/lib/python3.* -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete 2>/dev/null || true && \
-    mkdir -p ~/.casa/data && \
-    echo "Hello from snow production image"
-LABEL org.opencontainers.image.source="https://github.com/miguelcarcamov/snow"
-LABEL org.opencontainers.image.description="Container image for SNOW"
-LABEL org.opencontainers.image.licenses=GPL3
+# Install the Wenuray wheel from dist/: in CI this is the wheel built and tested from the same commit
+# (see .github/workflows/build_latest_container.yaml). Locally, run `python3 -m build --wheel`
+# before `docker build -f Dockerfile.prod .`.
+COPY dist/*.whl /tmp/dist/
+# The base image already holds the pinned dependencies and the CASA data in /opt/casa/data
+RUN python3 -m pip install --no-cache-dir /tmp/dist/*.whl && \
+    rm -rf /tmp/dist && \
+    python3 -c "import wenuray.imaging, wenuray.selfcalibration; print('wenuray', wenuray.__version__)"
+LABEL org.opencontainers.image.source="https://github.com/miguelcarcamov/wenuray"
+LABEL org.opencontainers.image.description="Container image for Wenuray, radio-interferometric self-calibration"
+LABEL org.opencontainers.image.licenses=GPL-3.0-or-later

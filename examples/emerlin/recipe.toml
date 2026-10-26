@@ -1,0 +1,66 @@
+# Amplitude-phase self-calibration of an e-MERLIN target, on top of an existing phase table,
+# imaged with multiscale tclean: the recipe form of selfcal.py with its default options.
+#
+# A recipe describes the self-calibration only. selfcal.py also prepares the data first: it
+# splits the calibrated target into DATA (target.flagged.ms) and can flag residual RFI. Do that,
+# then:
+#
+# wenuray run recipe.toml --output target_selfcal
+
+ms = "target.flagged.ms"
+output = "target_selfcal"
+
+[apply]
+applymode = "calonly"  # leave data with failed solutions unflagged
+
+[solve]
+refant = "Kn,Cm,Mk2,Pi,De,Da"  # in order of preference
+minblperant = 2
+minsnr = 3.0
+gaintype = "G"
+combine = "spw"
+
+# tclean's own parameter names. Cell size and scales suit e-MERLIN at L-band; adjust them to your
+# band and target. With a mask of your own: usemask = "user", mask = "mask.im"
+[imager]
+type = "tclean"
+niter = 10000
+scales = [0, 3, 5, 10, 15, 20, 30, 40, 50, 80, 100]
+specmode = "mfs"
+deconvolver = "multiscale"
+gridder = "standard"
+pbcor = false
+interactive = false
+cycleniter = 100
+usemask = "auto-multithresh"
+mask = ""
+geometry = {imsize = 1024, cell = "0.02arcsec"}
+weighting = {weighting = "briggs", robust = 2.0}
+
+# The existing phase table, applied before every solve. Solutions combined over the 8 spws are
+# stored under spw 0
+[[initial_stack.tables]]
+path = "pcal"
+calmode = "p"
+spwmap = [0, 0, 0, 0, 0, 0, 0, 0]
+
+# Amplitude-phase solution intervals, from long to short, cleaning deeper as calibration improves.
+# Each round flags residual RFI (CORRECTED_DATA - MODEL_DATA) before imaging, with flagdata's
+# names; a rejected round's flags are rolled back
+[[steps]]
+type = "ampphase"
+solint = "14min"
+imaging = {nsigma = 3.0}
+flagging = {type = "residual", mode = "rflag", timedevscale = 3.0, freqdevscale = 3.0, spectralmax = 500, extendflags = false, ntime = "scan"}
+
+[[steps]]
+type = "ampphase"
+solint = "7min"
+imaging = {nsigma = 2.5}
+flagging = {type = "residual", mode = "rflag", timedevscale = 3.0, freqdevscale = 3.0, spectralmax = 500, extendflags = false, ntime = "scan"}
+
+[[steps]]
+type = "ampphase"
+solint = "3.5min"
+imaging = {nsigma = 2.0}
+flagging = {type = "residual", mode = "rflag", timedevscale = 3.0, freqdevscale = 3.0, spectralmax = 500, extendflags = false, ntime = "scan"}

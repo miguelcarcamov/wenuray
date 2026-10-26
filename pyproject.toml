@@ -1,5 +1,5 @@
-# pyproject.toml - Python project configuration for SNOW
-# SNOW: A Python object-oriented framework for radio-interferometric self-calibration
+# pyproject.toml - Python project configuration for Wenuray
+# Wenuray: radio-interferometric self-calibration
 #
 # This file follows PEP 518, PEP 517, and PEP 621 standards for Python project metadata
 # and build configuration.
@@ -13,7 +13,7 @@
 build-backend = "setuptools.build_meta"
 # Build dependencies required to build this package
 requires = [
-  "setuptools>=70.0.0",  # Package building and distribution
+  "setuptools>=77",  # Package building; SPDX license expressions (PEP 639)
   "setuptools-scm>=8",  # Automatic version management from git tags
   "wheel"  # Built distribution format
 ]
@@ -35,19 +35,26 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Astronomy",
   # Programming language
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  # License (update if different from LICENSE file)
-  "License :: OSI Approved",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   # Operating system
   "Operating System :: OS Independent",
   # Additional metadata
   "Natural Language :: English"
 ]
+# Only the packages Wenuray imports, as lower bounds so Wenuray installs next to other packages
+# (e.g. Pyralysis). requirements.txt pins a tested set for CI and Docker.
+dependencies = [
+  "astropy>=6.1",
+  "casatasks>=6.7",
+  "casatools>=6.7",
+  "multimethod>=1.11",  # Pyralysis 3.0 pins 1.11.2
+  "numpy>=1.26",
+  "tomli-w>=1.0"
+]
 description = "A Python object oriented framework to do radio-interferometric self-calibration"
-# Dynamic fields that are resolved at build time
-# version: Automatically determined from git tags via setuptools-scm
-# dependencies: Read from requirements.txt
-dynamic = ["version", "dependencies"]
+# Resolved at build time: the version comes from git tags via setuptools-scm
+dynamic = ["version"]
 # Keywords for PyPI search
 keywords = [
   "radio astronomy",
@@ -59,33 +66,54 @@ keywords = [
   "imaging",
   "calibration"
 ]
-license = {file = "LICENSE"}
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 maintainers = [
   {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"}
 ]
-name = "snow"
+# The distribution, the import and the command are all wenuray
+name = "wenuray"
 readme = "README.md"
-requires-python = ">=3.10, <3.11"  # Constrained to Python 3.10 for CASA compatibility
+# casatools wheels exist for Python 3.12-3.13 (CASA >= 6.7.2); Pyralysis needs <3.14
+requires-python = ">=3.12, <3.14"
+
+# Imagers built by name from configuration files; third-party packages register theirs here too
+[project.entry-points."wenuray.imagers"]
+pyralysis = "wenuray.imaging.backends.pyralysis:Pyralysis"
+tclean = "wenuray.imaging.backends.tclean:Tclean"
+
+[project.optional-dependencies]
+# Only wenuray.selfcalibration.observers.GainPlotObserver needs it
+plots = ["matplotlib>=3.8"]
+# 3.2.1 is the first Pyralysis whose pipeline loads CORRECTED_DATA with a selection and writes
+# MODEL_DATA (#80). It depends on ska-ost-array-config, published on SKA's index:
+# pip install "wenuray[pyralysis]" --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
+pyralysis = ["pyralysis>=3.2.1"]
+# Only wenuray.utils.reproject() needs it; it pulls in dask, zarr and image libraries
+reproject = ["reproject>=0.14"]
+test = ["matplotlib>=3.8", "pytest>=8", "reproject>=0.14"]
+
+[project.scripts]
+wenuray = "wenuray.cli:main"
 
 # Project URLs (homepage, repository, documentation, etc.)
 [project.urls]
-Homepage = "https://github.com/miguelcarcamov/snow"
-Repository = "https://github.com/miguelcarcamov/snow"
-Source = "https://github.com/miguelcarcamov/snow"
+Homepage = "https://github.com/miguelcarcamov/wenuray"
+Repository = "https://github.com/miguelcarcamov/wenuray"
+Source = "https://github.com/miguelcarcamov/wenuray"
+
+[tool.pytest]
+
+[tool.pytest.ini_options]
+markers = ["casa: runs real CASA tasks (tests/integration, skipped without CASA)"]
 
 # Setuptools-specific configuration
 [tool.setuptools]
 
-# Dynamic field resolution
-[tool.setuptools.dynamic]
-# Dependencies are read from requirements.txt
-# Version is automatically handled by setuptools-scm (no explicit configuration needed)
-dependencies = {file = "requirements.txt"}
-
 # Package discovery configuration
 [tool.setuptools.packages.find]
-# Find all packages starting with "snow"
-include = ["snow*"]
+# Find all packages starting with "wenuray"
+include = ["wenuray*"]
 # Don't use namespace packages
 namespaces = false
 # Look for packages in the src directory
@@ -99,5 +127,3 @@ where = ["src"]
 [tool.setuptools_scm]
 # Don't add local version identifier (e.g., +dirty, +local)
 local_scheme = "no-local-version"
-# Write version to this file for runtime access
-write_to = "src/snow/_version.py"

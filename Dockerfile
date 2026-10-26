@@ -1,73 +1,79 @@
-FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
-ENV BUILD_DIR "build"
-ENV CONFIG "Release"
-ENV PATH /usr/local/cuda/bin${PATH:+:${PATH}}
-ENV LD_LIBRARY_PATH /usr/local/cuda/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+# Base image: Python, Wenuray's pinned dependencies and CASA's measures data, kept small.
+# - No CUDA: nothing in Wenuray uses the GPU yet. GPUvmem was removed and Pyralysis (#24) brings its
+#   own CUDA requirements when it is added.
+# - The casatools wheels bundle casacore, so nothing is compiled.
+# - Python 3.12 is supported by both CASA (>= 6.7.2) and Pyralysis (#30).
+# - The builder stage installs, strips and prunes; the measures stage fetches CASA's data; the
+#   final image only copies their results, without the build tools.
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Etc/UTC
+FROM ${PYTHON_IMAGE} AS builder
 
-# Update and install all system dependencies in a single layer to reduce image size
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends \
-        python3-dev python3-pip python3-wheel python3-setuptools \
-        ca-certificates openssl software-properties-common \
-        tzdata keyboard-configuration \
-        build-essential cmake gfortran g++ \
-        libncurses5-dev libreadline-dev flex bison \
-        libblas-dev liblapack-dev liblapacke-dev \
-        libcfitsio-dev wcslib-dev libfftw3-dev libhdf5-serial-dev \
-        python3-numpy libboost-all-dev libgsl-dev \
-        zlib1g-dev libncurses-dev libgdbm-dev libnss3-dev libssl-dev \
-        libreadline-dev libffi-dev wget git \
-        libgfortran5 libopenmpi-dev \
-    && update-ca-certificates \
-    && add-apt-repository -y main universe restricted multiverse \
-    && apt-get update -y \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/* /var/tmp/*
+    apt-get install -y --no-install-recommends binutils && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install casacore and clean up build artifacts to save space
-RUN git clone --single-branch --branch v3.5.0 --depth 1 https://github.com/casacore/casacore.git && \
-    cd casacore && \
-    mkdir build && \
-    cd build && \
-    cmake -DUSE_FFTW3=ON -DUSE_OPENMP=ON -DUSE_HDF5=ON -DBUILD_PYTHON3=ON -DUSE_THREADS=ON -DBUILD_PYTHON=OFF .. && \
-    make -j$(nproc) && \
-    make install && \
-    cd / && \
-    rm -rf /casacore && \
-    rm -rf /tmp/* /var/tmp/*
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH=/opt/venv/bin:$PATH
+RUN python -m venv /opt/venv
 
-# Install CUDA samples (shallow clone to save space)
-RUN cd /usr/local/cuda && \
-    git clone --single-branch --branch v11.8 --depth 1 https://github.com/NVIDIA/cuda-samples.git samples && \
-    cd samples && \
-    mv Common common && \
-    mv Samples samples && \
-    cd common && \
-    mkdir inc && \
-    mv *.h inc/ && \
-    cd / && \
-    rm -rf /tmp/* /var/tmp/*
+# The pinned dependency set that CI tests. Then, to save space:
+# - strip the debug symbols left in some libraries bundled with casatools (~30 MB);
+# - drop the test suites of numpy, scipy and matplotlib (~55 MB). astropy imports its own tests
+#   package at startup, so it is kept.
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt && \
+    site=$(python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") && \
+    find "$site/casatools" -type f -name "*.so*" -exec strip --strip-unneeded {} + && \
+    find "$site/numpy" "$site/scipy" "$site/matplotlib" "$site/mpl_toolkits" \
+        -depth -type d -name tests -exec rm -rf {} + && \
+    python -c "import casaconfig, numpy, scipy, matplotlib"
 
-# Install GPUVmem and clean up build artifacts
-RUN git clone --depth 1 https://github.com/miguelcarcamov/gpuvmem.git && \
-    cd gpuvmem && \
-    cmake . -B $BUILD_DIR -DCMAKE_BUILD_TYPE=$CONFIG && \
-    cd $BUILD_DIR && \
-    cmake --build . --target install --verbose -j$(nproc) && \
-    cd / && \
-    rm -rf /gpuvmem && \
-    rm -rf /tmp/* /var/tmp/*
+FROM builder AS measures
 
-# Upgrade pip and install Python dependencies (no cache to save space)
-RUN python3 --version && \
-    pip3 --version && \
-    python3 -m pip install --upgrade --no-cache-dir pip && \
-    python3 -m pip install --no-cache-dir mpi4py && \
-    python3 -m pip cache purge && \
-    echo "Hello from SNOW base image"
-LABEL org.opencontainers.image.source="https://github.com/miguelcarcamov/snow"
-LABEL org.opencontainers.image.description="Container image for SNOW"
-LABEL org.opencontainers.image.licenses=GPL3
+# CASA reads its measures data (IERS Earth orientation, observatory positions, ephemerides) from
+# measurespath. Only the measures (~20 MB) and CASA's maintained observatory table are kept, not the
+# full casarundata (~1 GB), which adds antenna responses and simulator files used by e.g. the
+# awproject gridder; mount it at /opt/casa/data if you need it. tools/fetch_casa_data.py explains
+# where each part comes from. The NRAO server can be slow, so the download is retried;
+# MEASURES_SITE selects another measures server.
+ARG MEASURES_SITE=""
+COPY tools/fetch_casa_data.py /tmp/fetch_casa_data.py
+RUN mkdir -p /opt/casa/data && \
+    for attempt in 1 2 3; do \
+        rm -rf /opt/casa/data/* && \
+        python /tmp/fetch_casa_data.py /opt/casa/data --measures-site "${MEASURES_SITE}" && break; \
+        [ "$attempt" = 3 ] && exit 1; \
+        sleep 30; \
+    done && \
+    test -f /opt/casa/data/geodetic/readme.txt && test -d /opt/casa/data/geodetic/Observatories && \
+    printf '%s\n' 'measurespath = "/opt/casa/data"' 'measures_auto_update = False' \
+        'data_auto_update = False' > /opt/casa/casasiteconfig.py && \
+    chmod -R a+rX /opt/casa
+
+FROM ${PYTHON_IMAGE}
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH=/opt/venv/bin:$PATH \
+    VIRTUAL_ENV=/opt/venv
+
+# OpenMP's runtime: Numba's thread-safe threading layer, which Pyralysis (#24) needs to run its
+# parallel kernels from several Dask threads (without it, Numba's fallback aborts the process)
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+# Auto updates are off, so every container of an image uses the same data. The directory is
+# readable by any user (e.g. under Apptainer/Singularity).
+COPY --from=measures /opt/casa /opt/casa
+
+# CASA looks telescopes up by name in its observatory table (e.g. for frame conversions)
+RUN python -c "import casatasks, casatools; print('casatools', casatools.version_string()); \
+me = casatools.measures(); assert all(me.observatory(t) for t in ('VLA', 'ALMA'))"
+
+LABEL org.opencontainers.image.source="https://github.com/miguelcarcamov/wenuray"
+LABEL org.opencontainers.image.description="Container image for Wenuray, radio-interferometric self-calibration"
+LABEL org.opencontainers.image.licenses=GPL-3.0-or-later

@@ -1,0 +1,16 @@
+---
+description: Naming conventions and method order (aligned with Pyralysis)
+globs:
+  - "**/*.py"
+alwaysApply: true
+---
+
+# Naming
+
+- Classes `CamelCase` (`SelfcalPipeline`, `CalTable`); functions, methods and modules `snake_case`.
+- Functions start with a verb (`derive_spwmap()`, `build_applycal_args()`).
+- Plural names for collections (`steps`, `caltables`).
+- Use radio-astronomy / CASA terminology consistently: `solint`, `calmode`, `refant`, `spwmap`, `combine`, `MODEL_DATA`. Don't invent synonyms.
+- User-facing parameters that map onto a CASA parameter keep the **CASA name** (`usemask`, `minblperant`).
+- Private `__name`, protected `_name`. Inside a class, order methods private → protected → public.
+- Booleans read as predicates (`is_model_written`, `has_corrected_column`).

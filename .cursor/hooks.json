@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "tools/hooks/block-protected-push.sh",
+        "matcher": "git push"
+      }
+    ]
+  }
+}

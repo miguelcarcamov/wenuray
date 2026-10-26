@@ -1,0 +1,51 @@
+# Phase, then amplitude-phase self-calibration of an ALMA dataset imaged with tclean: the recipe
+# form of selfcal.py, which builds the same run. The values suit this example's data; adapt them
+# to yours (Wenuray's own defaults come from theory or the data, not from an instrument).
+#
+# wenuray validate recipe.toml
+# wenuray run recipe.toml --ms target.ms --output target_selfcal --plots
+
+ms = "target.ms"  # the calibrated target data in DATA
+output = "target_selfcal"
+
+[solve]
+refant = "DA51"
+minblperant = 6
+minsnr = 3.0
+gaintype = "T"
+
+# tclean's own parameter names. Automasking values for long baselines:
+# https://casaguides.nrao.edu/index.php/Automasking_Guide
+[imager]
+type = "tclean"
+niter = 100
+threshold = "0.1mJy"
+specmode = "mfs"
+deconvolver = "hogbom"
+gridder = "standard"
+usemask = "auto-multithresh"
+sidelobethreshold = 3.0
+noisethreshold = 5.0
+minbeamfrac = 0.3
+lownoisethreshold = 1.5
+negativethreshold = 0.0
+interactive = false  # true to edit the masks by hand
+geometry = {imsize = 1024, cell = "0.005arcsec"}
+weighting = {weighting = "briggs", robust = 0.5}
+
+# Phases combined over spectral windows, then amplitudes and phases per spectral window, cleaned
+# deeper. Each spwmap is derived from combine.
+[[steps]]
+type = "phase"
+solint = "inf"
+solve = {combine = "spw"}
+
+[[steps]]
+type = "phase"
+solint = "600s"
+solve = {combine = "spw"}
+
+[[steps]]
+type = "ampphase"
+solint = "inf"
+imaging = {threshold = "0.025mJy"}

@@ -1,0 +1,13 @@
+---
+description: Exceptions, validation and logging
+globs:
+  - "**/*.py"
+alwaysApply: true
+---
+
+# Errors and logging
+
+- Validate configuration **early**, at construction or before the first round, with messages that say how to fix it (e.g. "spw selection starts at 1 but spwmap maps to 0").
+- Raise exceptions; never return sentinel values or swallow errors. Use `FileNotFoundError` for missing inputs, `ValueError` for bad values, and `TypeError` for wrong types.
+- Silent fallbacks that change the science (point-source model, wrong column, dropped table) must be **errors**, or at least explicit warnings.
+- Use `logging` (module logger `logging.getLogger(__name__)`), not `print`. Log each round's metrics at INFO.

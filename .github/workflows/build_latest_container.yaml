@@ -10,9 +10,14 @@ on:
   release:
     types: [published]
 
+# Superseded pull request runs are cancelled; release runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   REGISTRY: ghcr.io
-  PYTHON_VERSION: '3.10'
+  PYTHON_VERSION: '3.12'
 
 permissions:
   contents: read
@@ -36,49 +41,43 @@ jobs:
     - name: Install yapf
       run: |
         python -m pip install --upgrade pip
-        pip install yapf
+        pip install yapf==0.43.0  # same version as .pre-commit-config.yaml
     - name: Run yapf
       run: |
         yapf --recursive --verbose --diff .
   build:
     runs-on: ubuntu-latest
     needs: lint
-    container:
-      image: ghcr.io/${{ github.repository }}:base
-      credentials:
-        username: ${{ github.repository_owner }}
-        password: ${{ secrets.REGISTRY_TOKEN }}
     steps:
     - uses: actions/checkout@v4
       with:
-        fetch-depth: 0
-        set-safe-directory: true
-    - name: Force directory safe
+        fetch-depth: 0  # setuptools-scm derives the version from the tags
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Build sdist and wheel
       run: |
-        git config --global --add safe.directory "$GITHUB_WORKSPACE"
-    - name: Install dependencies
-      run: |
-        python3 -m pip install --upgrade pip wheel setuptools setuptools-scm
-        python3 -m pip install build
-    - name: Build package
-      run: python3 -m build
-    - name: Install snow
-      run: pip install dist/*.tar.gz
+        python -m pip install --upgrade pip
+        pip install build
+        python -m build
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: snow-artifacts
+        name: wenuray-artifacts
         path: dist/*
-    - name: Run commands to test that everything is finished
-      run: |
-        pip3 freeze | grep "snow"
-        python3 -c "import snow"
   build-latest-container:
     runs-on: ubuntu-latest
     needs: build
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    # The image installs the wheel built and tested by the build job, i.e. this exact commit.
+    - name: Download built package
+      uses: actions/download-artifact@v4
+      with:
+        name: wenuray-artifacts
+        path: dist/
     - name: Free up disk space
       run: |
         sudo rm -rf /usr/share/dotnet
@@ -86,12 +85,14 @@ jobs:
         sudo rm -rf /opt/hostedtoolcache/CodeQL
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
         df -h
+    # Pull requests only check that the image builds, so they don't log in
     - name: Login to GitHub Container Registry
+      if: github.event_name == 'release'
       uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
-        username: ${{ github.repository_owner }}
-        password: ${{ secrets.REGISTRY_TOKEN }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     - name: Setup Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Prune Docker system
@@ -101,9 +102,11 @@ jobs:
       with:
         context: .
         file: ./Dockerfile.prod
-        push: true
-        tags: ${{ env.REGISTRY }}/${{ github.repository }}:latest
+        # Pull requests only check that the image builds; releases publish it under their tag.
+        # Only full releases move :latest, so a pre-release can't replace the image users pull.
+        push: ${{ github.event_name == 'release' }}
+        tags: |
+          ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.event_name == 'release' && github.event.release.tag_name || format('pr-{0}', github.event.number) }}
+          ${{ github.event_name == 'release' && !github.event.release.prerelease && format('{0}/{1}:latest', env.REGISTRY, github.repository) || '' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        build-args: |
-          BUILDKIT_INLINE_CACHE=1

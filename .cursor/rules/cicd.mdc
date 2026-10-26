@@ -1,0 +1,39 @@
+---
+description: GitHub Actions, containers, packaging and releases
+globs:
+  - ".github/**"
+  - "Dockerfile*"
+  - "pyproject.toml"
+  - ".pre-commit-config.yaml"
+alwaysApply: false
+---
+
+# GitHub Actions
+
+- Pin actions to a release tag (or SHA), never `@master`. Keep them current via `.github/dependabot.yml`.
+- Only push container images on pushes to default branches or tags, **never from `pull_request`**. PRs build with `push: false`.
+- Build images from the checked-out source (COPY the wheel or source), not `pip install git+...` of a branch.
+- Pure-Python jobs (lint, build, unit tests) run on `actions/setup-python` with pip caching, not in the CUDA image. Reserve the heavy image for GPU and integration jobs.
+- Use `GITHUB_TOKEN` with minimal `permissions:`. Publish to PyPI with trusted publishing (OIDC).
+- Add `concurrency:` groups so superseded runs are cancelled.
+- Lint in CI with `pre-commit run --all-files`, the same hooks as locally.
+
+# Packaging
+
+- `pyproject.toml` is the single source of metadata and dependencies. Use lower bounds in `dependencies`; put exact pins only in lock/constraint files for CI and Docker.
+- Declare only what is imported. Optional backends go in extras (e.g. `wenuray[pyralysis]`).
+- Version comes from setuptools-scm, read at run time with `importlib.metadata.version("wenuray")`; no version file is written.
+- `requirements.txt` is the pinned set for CI and Docker, generated with `uv pip compile pyproject.toml`.
+
+# Containers
+
+- Combine `apt-get update && apt-get install ... && rm -rf /var/lib/apt/lists/*` in one layer.
+- Pin external sources (tags or commit SHAs) cloned or downloaded during builds.
+- Use multi-stage builds: compile in a devel stage, run on a runtime base.
+
+# Branches, commits and releases
+
+- `development` is the integration branch and `master` the release branch. Work on `chg/<issue>-<slug>` or `fix/<issue>-<slug>` branches from `development` and open PRs into `development`. Never base a PR on another unmerged PR (squash merges strand it). Direct pushes to `development` and `master` are blocked by `tools/hooks/block-protected-push.sh` for agents.
+- Commit prefixes used in history: `CHG:` (change/feature) and `FIX:` (bug fix).
+- Reference the GitHub issue in commits and PRs (`Closes #25`).
+- Semantic versioning via git tags; releases publish to PyPI.

@@ -1,5 +1,4 @@
-# Conda environment file for the SNOW (Self-calibration) project
-# SNOW: A Python object-oriented framework for radio-interferometric self-calibration
+# Conda environment file for Wenuray, radio-interferometric self-calibration
 #
 # To create this environment:
 #   conda env create -f environment.yml
@@ -8,47 +7,17 @@
 #   conda env update -f environment.yml --prune
 #
 # To activate this environment:
-#   conda activate snow-env
+#   conda activate wenuray-env
 
-name: snow-env
+name: wenuray-env
 
-# Channel priority: conda-forge first (more up-to-date packages), then defaults
 channels:
 - conda-forge
-- defaults
 
 dependencies:
-  # Python version constraint
-  # Note: Constrained to Python 3.10 due to CASA (Common Astronomy Software Applications)
-  # compatibility requirements. CASA packages may not support newer Python versions.
-- python>=3.10,<3.11
-
-  # Core scientific computing libraries
-  # numpy: Fundamental package for numerical computing (pinned for CASA compatibility)
-- numpy=1.26
-
-  # System libraries
-  # ncurses: Terminal control library (required by some CASA tools)
-- ncurses=6.2
-
-  # Visualization
-  # matplotlib: Plotting library for data visualization
-- matplotlib
-
-  # Parallel computing
-  # mpi4py: Python bindings for MPI (Message Passing Interface) for parallel processing
-- mpi4py
-
-  # Package management
-  # pip: Python package installer (needed to install packages from requirements.txt)
+  # The CASA wheels support Python 3.12-3.13; Pyralysis needs <3.14 (#30)
+- python=3.12
 - pip
-
-  # Pip-installed packages
-  # These packages are installed via pip rather than conda because:
-  # 1. CASA packages are primarily distributed via PyPI
-  # 2. Some packages need specific versions that are better managed through pip
-  # 3. Some packages may not be available in conda-forge
+  # CASA and the other dependencies come from PyPI, pinned to the set tested in CI
 - pip:
-    # Install all packages listed in requirements.txt
-    # This includes CASA packages, astropy, scipy, and other dependencies
   - -r requirements.txt

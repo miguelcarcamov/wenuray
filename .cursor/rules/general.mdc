@@ -1,0 +1,32 @@
+---
+description: Wenuray purpose, scope, and general principles — read first
+globs:
+  - "**/*.py"
+alwaysApply: true
+---
+
+# What Wenuray is for
+
+Wenuray (ca**S**a pytho**N** self-calibrati**O**n frame**W**ork) exists so radio astronomers stop rewriting a one-off self-calibration script for every new dataset. A user should be able to describe a self-cal procedure **briefly, declaratively and reproducibly**, and rerun it on another dataset by changing only what really differs.
+
+Judge every change against that goal:
+
+- Does it make the user's procedure **shorter or clearer**? Prefer defaults derived from theory or the data over new user-facing parameters. Wenuray ships **no instrument presets**: users keep their own shared settings as TOML files (`preset = "group.toml"`), and limits that depend on an instrument or the science are opt-in, with no default value.
+- Does it keep runs **reproducible**? Same config + same input data + same versions must give the same result, and a run must record what it did.
+- Is it **correct by radio-interferometry theory**? See `selfcal-domain.mdc`. A convenient API that gives wrong calibration is worse than no API.
+
+Layers, from the user inward:
+
+1. **TOML recipe** (`wenuray run recipe.toml`) — what most users touch. A recipe is a serialisation of the Python objects, not a second API (`wenuray.recipe`).
+2. **Python API** (`Selfcal`, the `Phasecal`/`Ampcal`/`AmpPhasecal` steps, config objects) — for power users and scripting.
+3. **Backends** — CASA tasks (`gaincal`, `applycal`, `tclean`) and imagers (`Tclean`, `Pyralysis`, or a user's own through the `wenuray.imagers` entry point).
+
+The design was set in GitHub issue #22 (milestone "v1.0 redesign"); self-cal with the Pyralysis imager is #24. How agents work on the repository is in `AGENTS.md`.
+
+# General principles
+
+- Python version follows `requires-python` in `pyproject.toml`. It is `>=3.12,<3.14`, the overlap of the CASA wheels and Pyralysis (#30).
+- Keep code simple, readable and maintainable; avoid duplication (the three copied self-cal loops are the cautionary example).
+- PEP 8, formatted with `yapf` + `isort` (config in `setup.cfg`, column limit 100), enforced via `pre-commit`.
+- `pytest` for tests. New behaviour needs tests (see `testing.mdc`).
+- **Legacy code predates these rules.** New and changed code must follow them. Don't mass-refactor untouched code outside the scope of the issue you are working on; open or extend an issue instead.

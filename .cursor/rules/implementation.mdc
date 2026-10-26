@@ -1,0 +1,28 @@
+---
+description: Implementation principles — clear purpose, explicit code, known types, data read in samples
+globs:
+  - "**/*.py"
+alwaysApply: true
+---
+
+# Implementation
+
+- Every class, function and module has one clear purpose. If its docstring needs "and", split it.
+- No global or module-level mutable state, and no module-level CASA tool instances (`casa-io.mdc`).
+  Code is as stateless as possible: config objects are frozen, and a run's state lives in the
+  loop and its result.
+- Prefer explicit code over implicit behaviour. No magic methods without a clear reason, no hidden
+  defaults that change the science.
+- **Dispatch on known types with `isinstance` or `multimethod`, never by probing attributes**
+  (`getattr(obj, "geometry", None)`). An optional capability is a base-class attribute or hook with
+  a documented default (e.g. `Imager.geometry = None`, `Imager.provenance()`).
+- **Read measurement sets in samples, never whole columns, when a statistic is enough.** Large
+  datasets have billions of visibilities: sample rows evenly (`selected_rows`), read blocks
+  spread through the selection (`preflight.read_sample`), and keep the cost independent of the
+  dataset's size. Read whole columns only when the operation needs every row (e.g. `uv_extent`
+  for the Nyquist check reads `u`, `v` and `FLAG_ROW`, never the visibilities).
+- Use NumPy vectorisation and broadcasting over Python loops on rows; loop over baselines,
+  spectral windows or tables, not over visibilities.
+- Profile before optimising (`cProfile`, `line_profiler`). Most of a run's time is in CASA tasks
+  and the imager; optimise Wenuray's own code only where a profile shows it matters.
+- Use the dtype's limits (`np.finfo(dtype).eps`) instead of hard-coded small constants.

@@ -1,49 +1,29 @@
-# Python package dependencies for SNOW (Self-calibration framework)
-# All packages are pinned to specific versions for reproducibility
-#
-# Installation:
-#   pip install -r requirements.txt
-#
-# Note: This file is used by both pip and conda (via environment.yml)
-
-# ============================================================================
-# CASA (Common Astronomy Software Applications) Packages
-# ============================================================================
-# CASA is a software package for radio astronomy data processing
-# These packages provide the core functionality for radio interferometry
-
-# ALMA-specific tasks for data reduction
-almatasks==0.0.0.3
-
-# ============================================================================
-# Scientific Python Ecosystem
-# ============================================================================
-
-# Astronomy and astrophysics
-astropy==6.1.0           # Core library for astronomy (coordinates, units, I/O, etc.)
-
-# CASA utilities
-casafeather==0.0.27      # CASA feather tool for combining images
-casalogger==1.0.23       # CASA logging functionality
-casampi==0.5.9           # CASA MPI support for parallel processing
-
-# CASA visualization and plotting
-casaplotms==2.7.4        # CASA plotms tool for measurement set visualization
-casaplotserver==2.0.3    # CASA plotting server
-casashell==6.7.0.31      # CASA command-line interface
-casatablebrowser==0.0.39 # CASA table browser utility
-
-# CASA core packages
-casatasks==6.7.0.31      # Main CASA tasks for data processing
-casatestutils==6.7.2.42  # CASA testing utilities
-casatools==6.7.0.31      # Core CASA tools and utilities
-casaviewer==2.4.4        # CASA image viewer
-
-# Numerical computing
-numpy==1.26.0            # Fundamental package for numerical computing
-
-# CASA core library (Python bindings for casacore)
-python-casacore==3.7.1   # Python interface to casacore C++ library
-reproject==0.14.1        # Astronomical image reprojection
-                        # Note: Version pinned to match conda environment for CASA compatibility
-scipy==1.15.0            # Scientific computing library (optimization, signal processing, etc.)
+# Pinned dependency set tested in CI and installed in the Docker images, for reproducible runs.
+# The package itself declares lower bounds in pyproject.toml. Regenerate after changing them:
+#   uv pip compile pyproject.toml --python-version 3.12 \
+#     --python-platform x86_64-manylinux_2_28 --no-annotate --no-header -o requirements.txt
+# then restore these comments and the casatools wheel URL below. Install with: pip install -r requirements.txt -e .
+astropy==8.0.2
+astropy-iers-data==0.2026.10.12.1.3.27
+casaconfig==1.5.2
+casatasks==6.7.6.14
+# The manylinux_2_34 casatools wheel bundles libssl without its libcrypto and fails to import on
+# Debian/Ubuntu/Arch (OPENSSL_3.0.1 not found). The manylinux_2_28 wheel bundles both.
+casatools @ https://files.pythonhosted.org/packages/e3/fe/29ffbf125acd6ae63f4465ba59878627fd41221fce2ab369748d5df9a190/casatools-6.7.6.14-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=f6db5ec590fb988799a614a0143391d4987d2c0650235b56fbedbdac33295e18
+certifi==2026.7.22
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.67.0
+kiwisolver==1.5.1
+matplotlib==3.11.2
+multimethod==1.11.2
+numpy==2.5.4
+packaging==26.3
+pillow==12.3.0
+pyerfa==2.0.1.5
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+pyyaml==6.0.3
+scipy==1.18.1
+six==1.17.0
+tomli-w==1.2.0

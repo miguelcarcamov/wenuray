@@ -1,0 +1,41 @@
+---
+description: Radio-interferometric self-calibration invariants every change must respect (gaincal/applycal/model/spwmap/acceptance)
+globs:
+  - "src/**/*.py"
+alwaysApply: true
+---
+
+# Self-calibration invariants
+
+These are domain rules, not style preferences. Code that breaks them produces wrong science silently. When unsure, cite the CASA documentation for the task in the PR.
+
+## Data and model
+
+- `gaincal` **solves against `DATA`**, with any `gaintable`s applied on the fly. It never reads `CORRECTED_DATA`. The input MS must therefore have calibrated data in `DATA` (`split` first), or every prior table must be pre-applied explicitly. Detect and warn when this doesn't hold.
+- The solve needs a model in `MODEL_DATA` (or a virtual model). Without one, `gaincal` silently uses a **1 Jy point source at the phase centre**. Every imager used for self-cal **must** write the model of the accepted image to the MS that the next `gaincal` reads, and the pipeline must check that it did.
+- The imager must image the **calibrated** visibilities (`CORRECTED_DATA` after `applycal`). This applies to Pyralysis too: request and fit `CORRECTED_DATA`, not `DATA`.
+
+## Calibration tables
+
+- Keep an **ordered stack** of accepted tables. Each new solve **pre-applies** the stack (`gaincal(gaintable=stack)`), and `applycal` applies the stack plus the new table. Don't replace the stack with the latest table.
+  - Exception: a fresh phase-only solve may deliberately solve from scratch and replace the previous phase table. Make that explicit in the code.
+- `spwmap` and `interp` belong to **each table**. When `combine` includes `'spw'`, map every selected spw to the **lowest selected spw id**; otherwise use `[]`. Never share one `spwmap` across tables.
+- Amplitude (`a`/`ap`) solves pre-apply the best phase solutions, normally at a shorter solint. Otherwise phase decorrelation within the solint biases the amplitudes low.
+- `solnorm=True` for amplitude solutions preserves the flux scale. Document any change to that.
+- `calwt=False` is the default for self-cal.
+
+## Selection
+
+- Solve, apply and image use the **same** field/spw/uvrange selection (one `Selection` object). A `uvrange` restriction for the solve must be explicit and recorded.
+
+## Acceptance and stopping
+
+- PSNR alone is not sufficient. Amplitude self-cal can raise PSNR by absorbing noise or unmodelled flux.
+- Compare rounds with the **same** noise estimator and region, with the source masked, for every imager.
+- Also track the fraction of flagged solutions (`calflag` flags data where a solution fails), the restoring beam, and the integrated flux.
+- Rollback restores the previous round's data, flags, model and table stack together.
+
+## Reproducibility
+
+- Each run records: the fully resolved config (presets and defaults expanded), Wenuray/CASA/backend versions, an input MS fingerprint, the accepted table stack, and per-round metrics.
+- No hidden randomness. If a backend is stochastic, a seed is part of the config.

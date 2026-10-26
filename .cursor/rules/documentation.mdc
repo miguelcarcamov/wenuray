@@ -1,0 +1,20 @@
+---
+description: Docstrings, comments, user docs and examples
+globs:
+  - "**/*.py"
+  - "**/*.md"
+alwaysApply: true
+---
+
+# Docstrings and comments
+
+- NumPy-style docstrings on every public class, method and function, with units and accepted values (e.g. `solint : str` — `"inf"`, `"60s"`, `"int"`).
+- For self-cal behaviour, state the **theory** assumption in the docstring (which column is solved and which tables are pre-applied).
+- Comments explain **why**, never what. Keep them sparse.
+
+# User documentation
+
+- The README and every example (`examples/<name>/recipe.toml` and `selfcal.py`) **must run against the current API**. When you change a public API, update them in the same PR. CI smoke-tests the examples.
+- Examples should be recipes a user can copy: a config file plus one command, not a script that parses `sys.argv` with `eval`.
+- Each example is a recipe a user can copy plus the Python script that builds the same run; a test keeps them equal.
+- Wenuray ships no instrument presets. Instrument-specific values in examples are marked as the example's, with links to CASA guides where relevant.

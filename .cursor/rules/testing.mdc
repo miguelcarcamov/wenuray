@@ -1,0 +1,20 @@
+---
+description: pytest layout, CASA-free unit tests, simulated end-to-end self-cal tests
+globs:
+  - "tests/**"
+  - "src/**/*.py"
+alwaysApply: true
+---
+
+# Tests
+
+- Layout: `tests/unit/` mirrors `src/wenuray/`; `tests/integration/` holds tests that need CASA; `tests/examples/` runs the README and `examples/`.
+- **Unit tests must not need CASA.** Keep argument building, spwmap derivation, config validation and statistics pure, so they can be tested with synthetic inputs (FITS arrays, dataclasses).
+- Mark CASA-dependent tests `@pytest.mark.casa`, GPU tests `@pytest.mark.gpu`, and long tests `@pytest.mark.slow`.
+- **Scientific regression test:** `wenuray.testing.simulate_point_source_ms` simulates a small MS with seeded antenna phase errors, and `injected_phases` returns them. `tests/integration/test_selfcal_recovers_gains_casa.py` self-calibrates it with each imager and asserts that the recovered phases match the injected ones, up to the reference antenna's phase and a source shift (self-cal can't fix the absolute position), and that the PSNR improves. Any change to the self-cal loop must keep it passing (#32).
+- **Import Wenuray as users get it:** `from wenuray.x import Y`, never `src.wenuray.x`, also in `mock.patch` and `monkeypatch` targets. Two import paths give two copies of every class, and `isinstance` fails between them.
+- **Assert values, not just form.** A test of a written, recorded or converted value compares what reads back with the value computed the plain way; asserting only a type, a shape or that a call ran passes broken code. A fixture makes the tested quantity non-trivial: e.g. an imaging test whose cell is coarser than the Nyquist cell runs on data the grid can't hold, so it tests nothing (#60). Simulated data must be physically valid for the check.
+- **Compare with physics in mind:** gains up to the degeneracies self-calibration has (reference phase, position), noise-limited tolerances derived from the simulation (e.g. one solution's phase noise σ / (S √((N−1) n_pol))), not tolerances tuned until the test passes.
+- Mocks declare absent data explicitly. A bare `Mock` attribute pretends a column or a capability exists.
+- Every bug fix comes with a test that fails before the fix.
+- Test the README/example recipes at least by import or a dry run.

@@ -6,6 +6,11 @@ repos:
     args: [--autofix, --indent, '2']
   - id: pretty-format-toml
     args: [--autofix]
+    exclude: ^examples/
+  # Example recipes read in the order they are written: what data, how to solve, how to image
+  - id: pretty-format-toml
+    args: [--autofix, --no-sort]
+    files: ^examples/
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v6.0.0

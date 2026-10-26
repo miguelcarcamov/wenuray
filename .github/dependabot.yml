@@ -1,0 +1,29 @@
+version: 2
+updates:
+- package-ecosystem: github-actions
+  directory: /
+  target-branch: development
+  schedule:
+    interval: weekly
+  groups:
+    github-actions:
+      patterns: ['*']
+
+- package-ecosystem: pip
+  directory: /
+  target-branch: development
+  schedule:
+    interval: weekly
+  groups:
+    casa:
+      patterns: [casa*, almatasks]
+  ignore:
+  # CASA 6.x wheels are built against NumPy 1.x
+  - dependency-name: numpy
+    update-types: [version-update:semver-major]
+
+- package-ecosystem: docker
+  directory: /
+  target-branch: development
+  schedule:
+    interval: monthly

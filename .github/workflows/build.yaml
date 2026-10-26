@@ -2,14 +2,20 @@ name: build
 
 on:
   push:
-    branches: [development, feature/refactoring]
+    branches: [development]
   pull_request:
     branches:
+    - development
     - master
+
+# Superseded pull request runs are cancelled; pushes always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   REGISTRY: ghcr.io
-  PYTHON_VERSION: '3.10'
+  PYTHON_VERSION: '3.12'
 
 permissions:
   contents: read
@@ -28,75 +34,157 @@ jobs:
     - name: Install yapf
       run: |
         python -m pip install --upgrade pip
-        pip install yapf
+        pip install yapf==0.43.0  # same version as .pre-commit-config.yaml
     - name: Run yapf
       run: |
         yapf --recursive --verbose --diff .
 
+  # The documentation must build without warnings. autoapi reads the source, so neither Wenuray nor
+  # CASA is installed
+  docs:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # setuptools-scm gives the documented version
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: pip
+        cache-dependency-path: docs/requirements.txt
+    - name: Build the documentation
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r docs/requirements.txt
+        sphinx-build -W --keep-going -b html docs docs/_build/html
+    - name: Upload the documentation
+      uses: actions/upload-artifact@v4
+      with:
+        name: wenuray-docs
+        path: docs/_build/html
+
   build:
     runs-on: ubuntu-latest
     needs: lint
-    container:
-      image: ghcr.io/${{ github.repository }}:base
-      credentials:
-        username: ${{ github.repository_owner }}
-        password: ${{ secrets.REGISTRY_TOKEN }}
     steps:
     - uses: actions/checkout@v4
       with:
-        fetch-depth: 0
-        set-safe-directory: true
-    - name: Force directory safe
+        fetch-depth: 0  # setuptools-scm derives the version from the tags
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Build sdist and wheel
       run: |
-        git config --global --add safe.directory "$GITHUB_WORKSPACE"
-    - name: Install dependencies
-      run: |
-        python3 -m pip install --upgrade pip wheel setuptools setuptools-scm
-        python3 -m pip install build
-    - name: Build package
-      run: python3 -m build
-    - name: Install snow
-      run: pip install dist/*.tar.gz
+        python -m pip install --upgrade pip
+        pip install build twine
+        python -m build
+        twine check --strict dist/*
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: snow-artifacts
+        name: wenuray-artifacts
         path: dist/*
-    - name: Run commands to test that everything is OK
-      run: |
-        pip3 freeze | grep "snow"
-        python3 -c "import snow"
+
   test:
     runs-on: ubuntu-latest
     needs: build
-    container:
-      image: ghcr.io/${{ github.repository }}:base
-      credentials:
-        username: ${{ github.repository_owner }}
-        password: ${{ secrets.REGISTRY_TOKEN }}
     steps:
     - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        fetch-depth: 0
-        set-safe-directory: true
-    - name: Force directory safe
-      run: |
-        git config --global --add safe.directory "$GITHUB_WORKSPACE"
-    #- name: Install pytest and pycov
-    #  run: |
-    #    pip3 install pytest
-    #    pip3 install pytest-cov
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: pip
+        cache-dependency-path: requirements.txt
     - uses: actions/download-artifact@v4
       with:
-        name: snow-artifacts
+        name: wenuray-artifacts
         path: dist/
-    - name: Install snow from artifacts
-      run: pip3 install dist/*.tar.gz
-    #- name: Test with pytest and pycov
-    #  run: pytest --cov=snow --cov-report xml:coverage.xml --cov-report term-missing tests/ -W "ignore" -v
-    #- uses: codecov/codecov-action@v4
-    #  with:
-    #    token: ${{ secrets.CODECOV_TOKEN }} # not required for public repos
-    #    files: ./coverage.xml
-    #    fail_ci_if_error: true # optional (default = false)
-    #    verbose: true # optional (default = false)
+    # The tests run against the built wheel with the pinned dependency set, not the source tree
+    - name: Install wenuray from the built wheel
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt "$(ls dist/*.whl)[test]"
+    # CASA reads its measures data when casatools is imported. As in the Docker image, only the
+    # measures and CASA's observatory table are fetched (not the ~1 GB casarundata), once a day at
+    # most.
+    - name: Date for the CASA data cache
+      id: date
+      run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+    - name: Cache CASA data
+      id: casa-data
+      uses: actions/cache@v4
+      with:
+        path: ~/.casa/data
+        key: casa-data-${{ steps.date.outputs.today }}
+        restore-keys: casa-data-
+    - name: Fetch CASA measures data
+      if: steps.casa-data.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/.casa/data
+        # A slow or failing server is fine if an earlier day's copy was restored from the cache
+        python tools/fetch_casa_data.py ~/.casa/data || test -d ~/.casa/data/geodetic/Observatories
+    - name: Turn CASA data auto updates off
+      run: |
+        mkdir -p ~/.casa
+        printf '%s\n' 'measures_auto_update = False' 'data_auto_update = False' > ~/.casa/config.py
+    - name: Import wenuray with CASA
+      run: |
+        python -c "import wenuray, wenuray.imaging, wenuray.selfcalibration; print(wenuray.__version__)"
+        wenuray --version  # the wheel installs the command
+    - name: Run tests
+      run: pytest tests -q
+
+  # Pyralysis (#24) is optional and heavy, so its tests run in a job of their own. The wheel's
+  # pyralysis extra installs it from PyPI (3.2.1 or later, #80); its ska-ost-array-config dependency
+  # comes from SKA's index.
+  test-pyralysis:
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      SKA_INDEX: https://artefact.skao.int/repository/pypi-internal/simple
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: pip
+        cache-dependency-path: requirements.txt
+    - uses: actions/download-artifact@v4
+      with:
+        name: wenuray-artifacts
+        path: dist/
+    # Pyralysis 3.0 pins its dependencies exactly (astropy, multimethod, ...), so they replace the
+    # pinned set here; only the CASA packages come from requirements.txt (its casatools wheel URL)
+    - name: Install wenuray and Pyralysis
+      run: |
+        python -m pip install --upgrade pip
+        grep '^casa' requirements.txt > casa-requirements.txt
+        pip install -r casa-requirements.txt "$(ls dist/*.whl)[test,pyralysis]" --extra-index-url "$SKA_INDEX"
+    - name: Date for the CASA data cache
+      id: date
+      run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+    - name: Cache CASA data
+      id: casa-data
+      uses: actions/cache@v4
+      with:
+        path: ~/.casa/data
+        key: casa-data-${{ steps.date.outputs.today }}
+        restore-keys: casa-data-
+    - name: Fetch CASA measures data
+      if: steps.casa-data.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/.casa/data
+        python tools/fetch_casa_data.py ~/.casa/data || test -d ~/.casa/data/geodetic/Observatories
+    - name: Turn CASA data auto updates off
+      run: |
+        mkdir -p ~/.casa
+        printf '%s\n' 'measures_auto_update = False' 'data_auto_update = False' > ~/.casa/config.py
+    - name: Run the Pyralysis tests
+      run: |
+        pip show pyralysis | head -2
+        pytest tests/integration/test_pyralysis_casa.py tests/integration/test_selfcal_recovers_gains_casa.py tests/unit/imaging/test_pyralysis_backend.py tests/unit/imaging/test_pyralysis_worker.py -q

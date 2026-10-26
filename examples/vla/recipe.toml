@@ -1,0 +1,42 @@
+# Phase, then amplitude-phase self-calibration of a VLA dataset imaged with tclean: the recipe
+# form of selfcal.py, which builds the same run. The values suit this example's data; adapt them
+# to yours.
+#
+# wenuray run recipe.toml --ms target.ms --output target_selfcal
+
+ms = "target.ms"
+output = "target_selfcal"
+
+[solve]
+refant = "VA05"
+minblperant = 4
+minsnr = 3.0
+gaintype = "G"
+
+# tclean's own parameter names. Automasking values for the VLA:
+# https://casaguides.nrao.edu/index.php/Automasking_Guide
+[imager]
+type = "tclean"
+niter = 100
+specmode = "mfs"
+deconvolver = "hogbom"
+gridder = "standard"
+pbcor = true
+usemask = "auto-multithresh"
+sidelobethreshold = 1.25
+noisethreshold = 5.0
+minbeamfrac = 0.1
+lownoisethreshold = 2.0
+negativethreshold = 0.0
+interactive = false
+geometry = {imsize = 1024, cell = "0.3arcsec"}
+weighting = {weighting = "briggs", robust = 0.5}
+
+[[steps]]
+type = "phase"
+solint = "inf"
+solve = {combine = "spw"}
+
+[[steps]]
+type = "ampphase"
+solint = "inf"

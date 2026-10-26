@@ -128,4 +128,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-!/src/snow/_version.py
+# Written by older setuptools-scm configurations; the version now comes from package metadata
+src/wenuray/_version.py
+
+# Sphinx output and the API pages autoapi generates
+docs/_build/
+docs/api/
+
+# Personal agent settings
+.claude/settings.local.json

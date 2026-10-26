@@ -1,0 +1,31 @@
+---
+description: Working with CASA tools/tasks, Measurement Sets, files and subprocesses safely
+globs:
+  - "src/**/*.py"
+alwaysApply: false
+---
+
+# CASA tools and tables
+
+- Don't create module-level tool singletons (`tb = table()`). Create the tool where it's needed and **always close it**, using `try/finally` or a small context manager (`with open_table(path) as tb:`). Close TaQL result tables too.
+- Call CASA tasks with keyword arguments only. Use the task's own parameter names.
+- Check that a column exists before reading it. Remember that virtual models carry no `MODEL_DATA` column.
+- CASA ≥ 6.6.4 needs measures data (`casaconfig`). Don't rely on a runtime download in tests or containers.
+
+# Files and directories
+
+- Never run shell commands to delete files (`os.system("rm -rf ...")`). Remove only paths Wenuray created itself, with `shutil.rmtree`/`Path.unlink`.
+- Put temporary products in a per-run directory (`tempfile.mkdtemp` under the output directory), never in the current working directory with fixed names.
+- Build paths with `pathlib.Path`. Don't concatenate strings or `partition(".ms")`.
+- A Measurement Set comes with a sibling `<ms>.flagversions` directory. Copying, moving or deleting the MS must handle both.
+
+# Subprocesses (external executables)
+
+- `subprocess.run([...], check=True)` with an argument **list**. No shell strings and no `shlex.split` of concatenated text.
+- Log the command, and surface the exit code and stderr in the raised exception.
+
+# FITS
+
+- Read data inside the `with fits.open(...)` block, or copy it. Don't return an HDU from a closed file.
+- NumPy image shapes are `(NAXIS2, NAXIS1)`.
+- Interpolate masks with nearest-neighbour (or threshold afterwards), never bilinear.

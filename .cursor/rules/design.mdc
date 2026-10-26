@@ -1,0 +1,81 @@
+---
+description: Class design for Wenuray — one self-cal loop, CalibrationStep hierarchy, CalStack, schedule rules, imager contract, config objects, policies
+globs:
+  - "src/**/*.py"
+alwaysApply: true
+---
+
+# Architecture (see GitHub issues #22 and #23)
+
+```text
+Selfcal (the ONLY self-cal loop — template method)
+ ├── steps: CalibrationStep (ABC, frozen dataclass)
+ │     ├── Phasecal
+ │     └── _AmplitudeStep  (solnorm, amplitude prerequisites)
+ │           ├── Ampcal
+ │           └── AmpPhasecal
+ ├── imager: Imager (ABC; image() enforces the contract, subclasses implement _reconstruct)
+ ├── solver: GainSolver · acceptance: AcceptancePolicy · stack policy: StackPolicy
+ ├── workspace: MSWorkspace (snapshot / restore)
+ └── observers: SelfcalObserver (logging, plots, provenance)
+```
+
+# Inheritance: put it where behaviour varies
+
+- **The loop exists once**, in `Selfcal.run`. Never add a `run()` loop to a step or imager subclass.
+- Calibration types are **subclasses of `CalibrationStep`** because they differ in behaviour (prerequisites, normalisation, plotting, gaincal extras). Put what varies in `ClassVar`s and small hooks (`_extra_gaincal_kwargs`), and build everything shared once in the base class. Shared amplitude behaviour lives once in `_AmplitudeStep`.
+- A new calibration type = a new subclass plus its transition rules. The loop doesn't change.
+- Imagers subclass `Imager` and implement only `_reconstruct`. The public `image()` is final, so it can always enforce the contract.
+- Use a subclass when behaviour differs; use a field when only a value differs. Don't add `if calmode == ...` or `isinstance` branches in the loop.
+
+# Dataclasses
+
+- Steps, config objects (`Selection`, `SolveOptions`, `ApplyOptions`, `ImageGeometry`, `Weighting`), `CalTable`, `CalStack` and results are `@dataclass(frozen=True)`.
+- Use `KW_ONLY` so the primary value stays positional (`Phasecal("60s")`) and everything else is keyword-only. That keeps subclasses free to add defaulted fields.
+- Validate in `__post_init__`, once. Derive values with `dataclasses.replace(...)`, which rejects unknown names, never `setattr` by string.
+- No mutable defaults: use `field(default_factory=...)`, tuples or `MappingProxyType`.
+
+# multimethod: type dispatch at boundaries and for rules
+
+Use `multimethod` (as Pyralysis does) when behaviour depends on the **runtime types of the arguments**, instead of `isinstance` chains:
+
+- `check_transition(prev, step, stack)`: schedule rules dispatched on `(previous step type, next step type)`. Each theory rule is one overload with its own test.
+- Coercion at the API boundary: `solint_seconds(str | float)`, `to_casa_quantity(str | float | Quantity)`, `as_initial_stack(None | CalStack | SelfcalResult | str)`.
+
+Don't use it where ordinary polymorphism (a method on the class) is enough.
+
+# Calibration state and schedules
+
+- Calibration state is an immutable `CalStack` of `CalTable(path, step, spwmap, interp)`. Only `CalStack` builds `gaincal` pre-apply and `applycal` argument lists. `spwmap` is derived per table, never a user parameter.
+- Every solve pre-applies the accepted stack (the `StackPolicy` decides which tables are kept).
+- `Selfcal.__init__` validates the whole schedule by simulating the stack. A schedule that breaks calibration theory raises `ScheduleError` **before any I/O**. Continuing a run uses `Selfcal.resume(result, ...)`, never another object's internals.
+
+# Parameter budget
+
+- A public constructor takes **at most ~8 parameters**, all of them used. If you need more, group them into a config object or split the class.
+- Don't add a parameter that theory or the data can supply (spwmap, cell/imsize, noise-based thresholds).
+
+# Policies and strategies
+
+Follow the Pyralysis "Policies" convention ([`.cursor/rules/design.mdc` in Pyralysis](https://gitlab.com/clirai/pyralysis/-/blob/development/.cursor/rules/design.mdc)): one family per configurable decision, frozen dataclasses, the default is an instance, and policies decide but never act.
+
+- `AcceptancePolicy` (keep or roll back a round; `AllOf`/`AnyOf` combinators), `StackPolicy` (`Accumulate`, `ReplacePhase`), `GainSolver`.
+- Strings (`"tclean"`, `"ap"`, `"alma"`) only at the boundary (config files, CLI), turned into objects by one registry/factory per family. Third-party imagers register via the `wenuray.imagers` entry point.
+
+# Imagers (plug-ins)
+
+- The contract: image `CORRECTED_DATA` and write `MODEL_DATA` to the MS given in the request. `Imager.image()` invalidates the model first and verifies it afterwards, raising `ImagerContractError` if it wasn't written. It also refuses an imager whose `geometry.cell` is coarser than the Nyquist cell of the selected data (#60): visibilities beyond the grid can't be modelled. The opt-out is an explicit `Selection(uvrange=...)`, never a silent drop.
+- Imagers are stateless with respect to the MS (it arrives in every `ImagingRequest`).
+- Backend options pass through using the backend's own names (`tclean`'s `usemask`). Validate them against the backend's signature.
+- Every imager, including users' own, should pass `wenuray.testing.ImagerContractSuite`.
+- Image statistics are computed once, by `ImageStatistics`, for all imagers. Optional backends are extras with lazy imports.
+
+# Cross-cutting concerns and side effects
+
+- Logging, gain plots and provenance are `SelfcalObserver`s, not constructor flags.
+- No I/O in constructors. `MSWorkspace` owns snapshots, rollback and cleanup.
+- Keep argument building, rules and statistics pure, so they can be tested without CASA.
+
+# Backwards compatibility
+
+v1.0 replaces the legacy constructors. Legacy arguments (`visfile=`, `solint=[...]`, `previous_selfcal=`) raise a `TypeError` that shows the new call. Deprecated aliases emit `DeprecationWarning` and have a test showing they behave like the new form.

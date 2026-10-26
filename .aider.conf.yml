@@ -1,0 +1,4 @@
+# Aider reads the rules and the agent guide with every request
+read:
+- CONVENTIONS.md
+- AGENTS.md
