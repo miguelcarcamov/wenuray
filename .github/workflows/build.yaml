@@ -24,11 +24,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     - name: Install yapf
@@ -45,11 +45,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0  # setuptools-scm gives the documented version
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         cache: pip
@@ -60,7 +60,7 @@ jobs:
         pip install -r docs/requirements.txt
         sphinx-build -W --keep-going -b html docs docs/_build/html
     - name: Upload the documentation
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: wenuray-docs
         path: docs/_build/html
@@ -69,11 +69,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0  # setuptools-scm derives the version from the tags
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     - name: Build sdist and wheel
@@ -83,7 +83,7 @@ jobs:
         python -m build
         twine check --strict dist/*
     - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: wenuray-artifacts
         path: dist/*
@@ -109,12 +109,12 @@ jobs:
         - {env: py312-pyralysis, python: '3.12'}
         - {env: py313-pyralysis, python: '3.13'}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python }}
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: wenuray-artifacts
         path: dist/
@@ -126,7 +126,7 @@ jobs:
       run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
     - name: Cache CASA data
       id: casa-data
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.casa/data
         key: casa-data-${{ steps.date.outputs.today }}
