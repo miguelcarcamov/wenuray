@@ -10,6 +10,7 @@ guide
 imagers
 examples
 migration
+changelog
 ```
 
 ```{toctree}

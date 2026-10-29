@@ -39,6 +39,27 @@ jobs:
       run: |
         yapf --recursive --verbose --diff .
 
+  # Every pull request into development adds a news fragment to changes/ for CHANGELOG.md, unless it
+  # is labelled no-changelog or comes from Dependabot
+  changelog:
+    if: >-
+      github.event_name == 'pull_request' && github.base_ref == 'development'
+      && github.actor != 'dependabot[bot]'
+      && !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Check for a news fragment
+      run: |
+        pip install towncrier==25.8.0
+        towncrier check --compare-with origin/${{ github.base_ref }}
+
   # The documentation must build without warnings. autoapi reads the source, so neither Wenuray nor
   # CASA is installed
   docs:
