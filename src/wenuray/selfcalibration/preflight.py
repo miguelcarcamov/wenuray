@@ -161,7 +161,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         dd_spw = dd_table.getcol("SPECTRAL_WINDOW_ID")
     with open_table(os.path.join(ms, "SPECTRAL_WINDOW")) as spw_table:
         all_channels = spw_table.getcol("NUM_CHAN")
-    channels = _selected_channels(indices, dd_spw, all_channels)
+    channels = _selected_channels(indices, dd_spw, all_channels, ddids)
 
     model = np.concatenate([block["model"] for block in blocks])
     differences = np.concatenate([_differences(block, interval) for block in blocks])
@@ -241,9 +241,14 @@ def _differences(block: dict, interval: float) -> np.ndarray:
     return np.concatenate(differences) if differences else np.zeros(0, dtype=complex)
 
 
-def _selected_channels(indices: dict, dd_spw: np.ndarray, all_channels: np.ndarray) -> list:
+def _selected_channels(
+    indices: dict, dd_spw: np.ndarray, all_channels: np.ndarray, data_ddids: np.ndarray
+) -> list:
     """
-    Channels of each selected spectral window, from the channel ranges of the spw selection
+    Channels of each selected spectral window, from the channel ranges of the spw selection. An
+    empty selection means the spectral windows that hold data (``data_ddids``, the data
+    descriptions of the selected rows), not every SPECTRAL_WINDOW row: data split from a larger
+    measurement set keep rows for windows they have no data in (#115)
     """
     ranges = indices["channel"]
     if len(ranges):
@@ -251,6 +256,6 @@ def _selected_channels(indices: dict, dd_spw: np.ndarray, all_channels: np.ndarr
         for spw, start, end, step in ranges:
             counts[spw] = counts.get(spw, 0) + len(range(start, end + 1, max(step, 1)))
         return [counts[spw] for spw in sorted(counts)]
-    spws = sorted({int(dd_spw[dd]) for dd in indices["dd"]}) if len(indices["dd"]) else \
-        range(len(all_channels))
+    ddids = indices["dd"] if len(indices["dd"]) else data_ddids
+    spws = sorted({int(dd_spw[dd]) for dd in ddids})
     return [int(all_channels[spw]) for spw in spws]

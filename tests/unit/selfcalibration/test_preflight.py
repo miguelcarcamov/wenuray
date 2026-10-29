@@ -4,7 +4,9 @@ import math
 import pytest
 
 from wenuray.config import SolveOptions
-from wenuray.selfcalibration.preflight import VisibilitySample, predict
+import numpy as np
+
+from wenuray.selfcalibration.preflight import VisibilitySample, _selected_channels, predict
 from wenuray.selfcalibration.steps import Ampcal, Phasecal
 
 # 1 Jy over 0.1 Jy noise with 10 antennas: 10 * 3 = 30 for one integration, channel and hand
@@ -58,3 +60,21 @@ def test_when_no_solint_is_enough_combining_is_advised():
     prediction = predict(SAMPLE, Phasecal("int"), SolveOptions(gaintype="G", minsnr=1e4))
 
     assert prediction.advice == "even a solint of a whole scan wouldn't; combine spectral windows"
+
+
+# An ALMA split: 21 SPECTRAL_WINDOW rows, data in spws 13, 15, 17 and 19 of 4 channels each
+DD_SPW = np.arange(21)
+ALL_CHANNELS = np.array([1, 1, 1, 1, 1, 8, 1, 8, 1, 8, 1, 8, 1, 4, 1, 4, 1, 4, 1, 4, 1])
+DATA_DDIDS = np.array([13, 15, 17, 19])
+
+
+def test_an_empty_spw_selection_counts_the_spectral_windows_with_data():
+    nothing_named = {"channel": np.zeros((0, 4), dtype=int), "dd": np.zeros(0, dtype=int)}
+
+    assert _selected_channels(nothing_named, DD_SPW, ALL_CHANNELS, DATA_DDIDS) == [4, 4, 4, 4]
+
+
+def test_a_spw_selection_counts_its_channel_ranges():
+    two_spws = {"channel": np.array([[13, 0, 3, 1], [15, 0, 1, 1]]), "dd": np.array([13, 15])}
+
+    assert _selected_channels(two_spws, DD_SPW, ALL_CHANNELS, DATA_DDIDS) == [4, 2]
