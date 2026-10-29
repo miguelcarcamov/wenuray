@@ -14,7 +14,7 @@ TCLEAN_PARAMETERS = frozenset(
     {
         "vis", "imagename", "field", "spw", "uvrange", "datacolumn", "savemodel", "imsize", "cell",
         "phasecenter", "stokes", "weighting", "robust", "uvtaper", "niter", "deconvolver",
-        "usemask", "nsigma", "threshold", "gridder"
+        "usemask", "nsigma", "threshold", "gridder", "specmode", "nterms"
     }
 )
 
@@ -87,6 +87,28 @@ class TestOptions:
 
     def test_imagers_compare_by_value(self):
         assert Tclean(GEOMETRY, niter=10) == Tclean(GEOMETRY, niter=10)
+
+    @pytest.mark.parametrize(
+        "options, expected",
+        [
+            ({}, False),
+            ({
+                "deconvolver": "hogbom"
+            }, False),
+            ({
+                "deconvolver": "mtmfs"
+            }, True),  # nterms defaults to 2
+            ({
+                "deconvolver": "mtmfs",
+                "nterms": 1
+            }, False),
+            ({
+                "specmode": "cube"
+            }, True),
+        ],
+    )
+    def test_models_spectrum(self, options, expected):
+        assert Tclean(GEOMETRY, **options).models_spectrum is expected
 
 
 class TestReconstruct:

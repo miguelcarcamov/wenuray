@@ -38,6 +38,11 @@ class FakeImager(Imager):
     peaks: object = None
     calls: list = dataclasses.field(default_factory=list, hash=False)
     niter: int = 100
+    spectral: bool = False
+
+    @property
+    def models_spectrum(self) -> bool:
+        return self.spectral
 
     def _reconstruct(self, request):
         self.calls.append((Path(request.name).name, self.niter))
@@ -465,9 +470,9 @@ class TestPredictedSolutionSNR:
     """The pre-flight S/N estimate (#28): warned about when below minsnr, and recorded."""
 
     @staticmethod
-    def sample(noise):
+    def sample(noise, channels=(1, ), band=(5.0e9, 5.1e9)):
         from wenuray.selfcalibration.preflight import VisibilitySample
-        return VisibilitySample(1.0, noise, 8, 60.0, 7200.0, 7200.0, (1, ), 2)
+        return VisibilitySample(1.0, noise, 8, 60.0, 7200.0, 7200.0, channels, 2, band)
 
     def test_is_recorded_for_each_step(self, casa):
         casa.sample = self.sample(0.05)
@@ -489,6 +494,28 @@ class TestPredictedSolutionSNR:
         assert "predicted solution S/N 1.9 is below minsnr 3" in caplog.text
         assert "a solint of 180s or longer would reach it" in caplog.text
         assert result.rounds[1].accepted
+
+    def test_amplitudes_per_spw_against_a_flat_model_warn(self, casa, caplog):
+        # Two windows over a 10% band; solutions precise to 1 / 74, far better than 10%
+        casa.sample = self.sample(0.05, channels=(1, 1), band=(4.75e9, 5.25e9))
+
+        with caplog.at_level(logging.WARNING):
+            Selfcal(casa.ms, imager(1.0, 2.0, 3.0),
+                    [Phasecal("inf"), AmpPhasecal("inf")]).run(observers=())
+
+        assert caplog.text.count("absorb the source's spectral index") == 1
+        assert "AmpPhasecal" in caplog.text and "across a 10.0% band" in caplog.text
+
+    def test_a_spectral_model_does_not_warn(self, casa, caplog):
+        casa.sample = self.sample(0.05, channels=(1, 1), band=(4.75e9, 5.25e9))
+
+        with caplog.at_level(logging.WARNING):
+            Selfcal(
+                casa.ms, imager(1.0, 2.0, 3.0, spectral=True),
+                [Phasecal("inf"), AmpPhasecal("inf")]
+            ).run(observers=())
+
+        assert "absorb the source's spectral index" not in caplog.text
 
     def test_no_estimate_without_a_sample(self, casa):
         result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("int")]).run(observers=())

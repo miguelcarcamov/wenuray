@@ -32,6 +32,13 @@
   visibility, times √(N_ant − 1) · √(n_int · n_chan · n_pol). It warns when the prediction is
   below `minsnr`, giving the shortest solint that would reach it, and records it as
   `predicted_snr`.
+- **Amplitudes and the source's spectrum.** An amplitude step that solves per spectral window
+  against a model without a spectrum lets each window's gain take up the source's flux at that
+  frequency: the residual drops, but the calibrated data lose their spectral index. A spectral
+  index α changes the amplitude by about α times the fractional bandwidth, so Wenuray warns when
+  the solutions are precise enough (1 / S/N below the fractional bandwidth) to absorb α = 1. Give
+  the imager a spectral model (tclean's `deconvolver="mtmfs"`, Pyralysis's `spectral_index`) or
+  solve with `combine="spw"`.
 - **A round is kept only if it improves the image.** By default the PSNR must rise and every
   solution interval must keep enough antennas (3 for phases, 4 for amplitudes), and amplitude
   rounds must not lose model flux. A rejected round is rolled back and stops the run.
