@@ -82,7 +82,7 @@ Ask for one by name, e.g. *"use the feature-dev skill for issue #65"*.
 
 ## Environment
 
-- **Python** `>=3.12,<3.14`. Install the pinned set: `pip install -r requirements.txt -e ".[test]"`,
+- **Python** `>=3.11,<3.14`; `tox` tests each version (`tox.ini`). Install the pinned set: `pip install -r requirements.txt -e ".[test]"`,
   then `pre-commit install`.
 - **CASA:** `casatools` comes from its `manylinux_2_28` wheel (the `manylinux_2_34` one fails
   outside RHEL-like systems with `OPENSSL_3.0.1 not found`). It needs measures data and a

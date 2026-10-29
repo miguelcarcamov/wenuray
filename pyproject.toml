@@ -24,7 +24,8 @@ requires = [
 [project]
 # Project authors and maintainers
 authors = [
-  {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"}
+  {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"},
+  {name = "Simon Casassus"}
 ]
 # PyPI classifiers for better package discoverability
 classifiers = [
@@ -35,6 +36,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Astronomy",
   # Programming language
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   # Operating system
@@ -69,13 +71,15 @@ keywords = [
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 maintainers = [
-  {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"}
+  {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"},
+  {name = "Simon Casassus"}
 ]
 # The distribution, the import and the command are all wenuray
 name = "wenuray"
 readme = "README.md"
-# casatools wheels exist for Python 3.12-3.13 (CASA >= 6.7.2); Pyralysis needs <3.14
-requires-python = ">=3.12, <3.14"
+# casatools wheels: Python 3.11 up to CASA 6.7.0, 3.12-3.13 from 6.7.2; Pyralysis needs
+# 3.11-3.13. tox tests each version (#99).
+requires-python = ">=3.11, <3.14"
 
 # Imagers built by name from configuration files; third-party packages register theirs here too
 [project.entry-points."wenuray.imagers"]
@@ -98,6 +102,7 @@ wenuray = "wenuray.cli:main"
 
 # Project URLs (homepage, repository, documentation, etc.)
 [project.urls]
+Changelog = "https://github.com/miguelcarcamov/wenuray/blob/master/CHANGELOG.md"
 Homepage = "https://github.com/miguelcarcamov/wenuray"
 Repository = "https://github.com/miguelcarcamov/wenuray"
 Source = "https://github.com/miguelcarcamov/wenuray"
@@ -127,3 +132,42 @@ where = ["src"]
 [tool.setuptools_scm]
 # Don't add local version identifier (e.g., +dirty, +local)
 local_scheme = "no-local-version"
+
+# ============================================================================
+# towncrier Configuration
+# ============================================================================
+# Each pull request adds a news fragment, changes/<issue>.<type>.md (or changes/+<slug>.<type>.md
+# without an issue); `towncrier build --version X.Y.Z` collects them into CHANGELOG.md at release
+[tool.towncrier]
+directory = "changes"
+filename = "CHANGELOG.md"
+issue_format = "[#{issue}](https://github.com/miguelcarcamov/wenuray/issues/{issue})"
+name = "Wenuray"
+title_format = "## [{version}](https://github.com/miguelcarcamov/wenuray/releases/tag/v{version}) ({project_date})"
+underlines = ["", "", ""]
+wrap = false
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "Features"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Bug fixes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removal"
+name = "Removals and deprecations"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "doc"
+name = "Documentation"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "misc"
+name = "Packaging and maintenance"
+showcontent = true

@@ -269,6 +269,62 @@ class TestPresets:
         )
         assert run.ms == str(tmp_path / "target.ms")
 
+    def test_imager_files_are_relative_to_the_file_that_names_them(self, tmp_path):
+        # The preset names the imager; the recipe only adds a file option
+        os.makedirs(tmp_path / "shared")
+        write(
+            tmp_path / "shared" / "group.toml", """
+            [imager]
+            type = "pyralysis"
+            terms = ["chi_squared"]
+            optimizer = "lbfgsb"
+            mask_mode = "file"
+            mask_path = "disk.fits"
+            geometry = { imsize = 512, cell = "0.1arcsec" }
+        """
+        )
+        path = write(
+            tmp_path / "recipe.toml", """
+            preset = "shared/group.toml"
+            ms = "target.ms"
+
+            [imager]
+            initial_model = "start.fits"
+
+            [[steps]]
+            type = "phase"
+            solint = "inf"
+            imaging = { mask_path = "masks/tight.fits" }
+        """
+        )
+
+        run = Selfcal.from_toml(path)
+
+        assert run.imager.options["mask_path"] == str(tmp_path / "shared" / "disk.fits")
+        assert run.imager.options["initial_model"] == str(tmp_path / "start.fits")
+        assert run.steps[0].imaging["mask_path"] == str(tmp_path / "masks" / "tight.fits")
+
+    def test_options_that_are_not_files_are_passed_as_written(self, tmp_path):
+        # tclean's mask may be a region rather than a file, so Tclean declares no file options
+        path = write(
+            tmp_path / "recipe.toml", """
+            ms = "target.ms"
+
+            [imager]
+            type = "tclean"
+            mask = "circle[[512pix, 512pix], 20pix]"
+            geometry = { imsize = 1024, cell = "0.05arcsec" }
+
+            [[steps]]
+            type = "phase"
+            solint = "inf"
+        """
+        )
+
+        run = Selfcal.from_toml(path)
+
+        assert run.imager.options["mask"] == "circle[[512pix, 512pix], 20pix]"
+
     def test_presets_that_include_each_other(self, tmp_path):
         write(tmp_path / "a.toml", 'preset = "b.toml"\n')
         write(tmp_path / "b.toml", 'preset = "a.toml"\n')

@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: If you use Wenuray in your research, please cite it as below.
+type: software
+title: "Wenuray: radio-interferometric self-calibration"
+abstract: >-
+  Wenuray is a Python framework for radio-interferometric self-calibration on top of CASA. A
+  self-calibration procedure is described once, as a short TOML recipe or a few Python objects,
+  and checked against self-calibration theory before it runs. Imaging is pluggable: CASA tclean,
+  Pyralysis or a user's own imager. Every run records the resolved recipe and its provenance, so
+  it can be repeated exactly.
+authors:
+  - family-names: Cárcamo
+    given-names: Miguel
+    affiliation: Universidad de Santiago de Chile
+    orcid: https://orcid.org/0000-0003-0564-8167
+  - family-names: Casassus
+    given-names: Simon
+    affiliation: Universidad de Chile
+    orcid: https://orcid.org/0000-0002-0433-9840
+repository-code: https://github.com/miguelcarcamov/wenuray
+url: https://wenuray.readthedocs.io/
+license: GPL-3.0-or-later
+keywords:
+  - radio astronomy
+  - radio interferometry
+  - self-calibration
+  - CASA
+  - imaging

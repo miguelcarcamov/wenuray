@@ -17,7 +17,8 @@ can be agreed before the code.
 
 ## Development setup
 
-Wenuray needs Python 3.12 or 3.13 (the CASA wheels) on Linux or macOS.
+Wenuray needs Python 3.11, 3.12 or 3.13 (the CASA wheels) on Linux or macOS. `tox` runs the tests
+on each version (`tox.ini`).
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
@@ -57,6 +58,8 @@ sphinx-build -W -b html docs docs/_build/html   # if you changed docs or docstri
   for bug fixes. Base every PR on `development`, not on another open PR.
 - Commit prefixes: `CHG:` and `FIX:`, with the issue number in the subject, e.g.
   `FIX: refuse an imaging cell coarser than the Nyquist cell (#60)`.
+- Add a news fragment for users in [`changes/`](changes/README.md), e.g. `changes/102.bugfix.md`;
+  CI checks for one. Changes users won't notice take the `no-changelog` label instead.
 - The PR says `Closes #N`, what changed and why, and the commands you ran. A change to how gains
   are solved or applied, how the model is written, or how a round is accepted explains the theory.
 - `development` is the integration branch and `master` the release branch; releases publish to
@@ -73,8 +76,19 @@ sphinx-build -W -b html docs docs/_build/html   # if you changed docs or docstri
    only when asked: `pip install --pre wenuray`.
 3. Test the candidate from PyPI and from the image. Fix problems on `development` and repeat with
    `rc2`, and so on.
-4. Publish the release itself from the same commit, tagged `vX.Y.Z`. It goes to PyPI and moves the
+4. On `development`, collect the news fragments into `CHANGELOG.md` with
+   `towncrier build --version X.Y.Z` (`pip install towncrier`), open a PR, and bring it to
+   `master` as in step 1. Release candidates don't build the changelog: preview their notes with
+   `towncrier build --draft --version X.Y.ZrcN`.
+5. Publish the release itself from that commit, tagged `vX.Y.Z`. It goes to PyPI and moves the
    `:latest` image.
+6. Merge `master` back into `development` with a merge commit. That brings the release tags into
+   `development`'s history, so its builds are versioned `X.Y.(Z+1).devN` rather than an old tag's.
 
 Versions come from the tag through setuptools-scm, and a release whose tag doesn't match the built
 version fails before uploading.
+
+Each major version is named after a woman who shaped radio astronomy, and its minor and patch
+releases keep the name: 1.x is "Payne-Scott", after Ruby Payne-Scott, who made some of the first
+radio-interferometric observations in 1946. Release titles read `Wenuray X.Y.Z "<Name>"`, and the
+notes of each `X.0.0` open with a short dedication.

@@ -26,7 +26,7 @@ EXAMPLES = ROOT / "examples"
 
 def readme_example() -> str:
     readme = (ROOT / "README.md").read_text()
-    section = readme[readme.index("### Basic Usage Example"):]
+    section = readme[readme.index("### The same run in Python"):]
     return re.search(r"```python\n(.*?)```", section, re.DOTALL).group(1)
 
 
@@ -167,7 +167,7 @@ class TestEmerlinExample:
 
 def test_the_readme_recipe_builds_the_readme_schedule(tmp_path):
     readme = (ROOT / "README.md").read_text()
-    section = readme[readme.index("### The same run as a TOML recipe"):]
+    section = readme[readme.index("### Your first recipe"):]
     (tmp_path /
      "recipe.toml").write_text(re.search(r"```toml\n(.*?)```", section, re.DOTALL).group(1))
 

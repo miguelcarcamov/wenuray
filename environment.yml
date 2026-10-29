@@ -15,7 +15,7 @@ channels:
 - conda-forge
 
 dependencies:
-  # The CASA wheels support Python 3.12-3.13; Pyralysis needs <3.14 (#30)
+  # requirements.txt pins the Python 3.12 casatools wheel; Wenuray supports 3.11-3.13 (#99)
 - python=3.12
 - pip
   # CASA and the other dependencies come from PyPI, pinned to the set tested in CI

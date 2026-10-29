@@ -30,7 +30,7 @@ import warnings
 from dataclasses import dataclass, field
 from importlib import metadata
 from types import MappingProxyType
-from typing import Mapping, Sequence, Tuple
+from typing import ClassVar, Mapping, Sequence, Tuple
 
 from casatools import ms
 
@@ -87,6 +87,7 @@ class Pyralysis(Imager):
     terms: Tuple[str, ...]
     optimizer: str
     options: Mapping = field(hash=False)
+    file_options: ClassVar[Tuple[str, ...]] = ("mask_path", "initial_model")
 
     def __init__(
         self,
@@ -193,11 +194,16 @@ class Pyralysis(Imager):
             "residual": request.name + ".residual.fits",
             "restored": request.name + ".image.fits",
         }
+        options = self._cli_options()
+        # The worker runs in the output directory: files are found from the caller's
+        for name in self.file_options:
+            if isinstance(options.get(name), str):
+                options[name] = os.path.abspath(options[name])
         _run(
             {
                 "ms": os.path.abspath(request.ms),
                 "taql": _taql(request.ms, request.selection),
-                "options": self._cli_options(),
+                "options": options,
                 "outputs": {
                     name: os.path.abspath(path)
                     for name, path in outputs.items()

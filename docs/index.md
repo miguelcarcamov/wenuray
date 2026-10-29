@@ -5,8 +5,12 @@
 :hidden:
 :caption: Guides
 
+installation
+guide
+imagers
 examples
 migration
+changelog
 ```
 
 ```{toctree}

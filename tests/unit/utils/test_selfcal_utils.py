@@ -140,3 +140,58 @@ class TestColumnsMatch:
 
         rows = sorted(set(fake.rows_read))
         assert len(rows) == 10 and rows[0] == 0 and rows[-1] == 999
+
+
+class TestGetSpwIdsWithoutSelection:
+    """
+    An empty selection means the spectral windows that hold data, not every row of the
+    SPECTRAL_WINDOW table: data split from a larger MS keep their original ids
+    """
+
+    class Tables:
+        """A main table whose rows use some data descriptions, and the DATA_DESCRIPTION table."""
+
+        def __init__(self, used_data_descriptions, spw_of_data_description):
+            self.used = np.array(used_data_descriptions)
+            self.spws = np.array(spw_of_data_description)
+            self.opened = []
+
+        def __call__(self):
+            tables = self
+
+            class Tool(FakeTable):
+
+                def open(self, tablename):
+                    super().open(tablename)
+                    tables.opened.append(self)
+                    self.name = tablename
+
+                def query(self, query="", columns=""):
+                    result = FakeTable()
+                    result.getcol = lambda column: tables.used
+                    self.calls.append(("query", query, columns))
+                    self.queries.append(result)
+                    return result
+
+                def getcol(self, column):
+                    assert self.name.endswith("/DATA_DESCRIPTION")
+                    assert column == "SPECTRAL_WINDOW_ID"
+                    return tables.spws
+
+            return Tool(nrows=len(tables.spws))
+
+    @pytest.mark.parametrize("spw", ["", "*"])
+    def test_returns_the_spectral_windows_of_the_data(self, monkeypatch, ms, spw):
+        # 21 spectral windows, of which the data use 13, 15, 17 and 19 (an ALMA split)
+        tables = self.Tables([19, 13, 17, 15], list(range(21)))
+        monkeypatch.setattr(selfcal_utils, "table", tables)
+
+        assert selfcal_utils.get_spw_ids(ms, spw) == [13, 15, 17, 19]
+        assert all(tool.closed for tool in tables.opened)
+        assert all(query.closed for tool in tables.opened for query in tool.queries)
+
+    def test_maps_data_descriptions_to_their_spectral_windows(self, monkeypatch, ms):
+        tables = self.Tables([0, 1], [7, 3])
+        monkeypatch.setattr(selfcal_utils, "table", tables)
+
+        assert selfcal_utils.get_spw_ids(ms, "") == [3, 7]
