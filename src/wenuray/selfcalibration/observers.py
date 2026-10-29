@@ -71,6 +71,14 @@ class LoggingObserver(SelfcalObserver):
             record.peak * 1e3, record.rms * 1e3, record.model_flux, 100 * record.flagged_fraction,
             "accepted" if record.accepted else "rejected", "; ".join(record.reasons)
         )
+        if record.thermal_noise:
+            logger.info(
+                "Round %d rms / thermal noise: %.2f%s", record.index,
+                record.rms / record.thermal_noise,
+                "" if record.rms_in_mask is None else ", inside the source mask: {0:.2f}".format(
+                    record.rms_in_mask / record.thermal_noise
+                )
+            )
 
     def on_finished(self, result: SelfcalResult) -> None:
         logger.info(

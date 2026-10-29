@@ -260,8 +260,9 @@ class Selfcal:
         stack = self.initial_stack
 
         result = self._image(self.imager, "round0")
+        thermal = self._thermal_noise()
         accepted = RoundMetrics(result.statistics())
-        rounds = [self._record(0, None, "", result, accepted, True, ("initial image", ))]
+        rounds = [self._record(0, None, "", result, accepted, True, ("initial image", ), thermal)]
         _notify(observers, "on_round", rounds[-1])
         workspace.snapshot("round0")
         snapshots = ["round0"]
@@ -290,9 +291,10 @@ class Selfcal:
             rounds.append(
                 self._record(
                     index, step, table.path, result, current, decision.accepted, decision.reasons,
-                    data_flagged, predicted
+                    thermal, data_flagged, predicted
                 )
             )
+            _warn_if_below_thermal(rounds[-1])
             _notify(observers, "on_round", rounds[-1])
             if not decision.accepted:
                 workspace.restore(snapshots[-1], stack)
@@ -369,6 +371,21 @@ class Selfcal:
             ImagingRequest(self.ms, os.path.join(self.output, name), self.selection)
         )
 
+    def _thermal_noise(self) -> Optional[float]:
+        """
+        The image's thermal noise from the data (#119), once per run after the initial image;
+        None if the data can't support an estimate
+        """
+        sample = preflight.read_sample(self.ms, self.selection)
+        if sample is None:
+            logger.debug("No thermal noise estimate for %s", self.ms)
+            return None
+        logger.info(
+            "Thermal noise from the data: %.3g mJy/beam (natural weighting; a floor for others)",
+            sample.thermal_noise * 1e3
+        )
+        return sample.thermal_noise
+
     def _predict_snr(self, step: CalibrationStep, model_imager: Imager) -> Optional[float]:
         """
         The step's solution S/N predicted from the data, against the accepted model in
@@ -436,6 +453,7 @@ class Selfcal:
         metrics: RoundMetrics,
         accepted: bool,
         reasons: Sequence[str],
+        thermal_noise: Optional[float],
         data_flagged: Optional[Tuple[float, float]] = None,
         predicted_snr: Optional[float] = None
     ) -> RoundRecord:
@@ -455,6 +473,8 @@ class Selfcal:
             reasons=tuple(reasons),
             data_flagged=data_flagged,
             predicted_snr=predicted_snr,
+            rms_in_mask=statistics.rms_in_mask,
+            thermal_noise=thermal_noise,
         )
 
     @staticmethod
@@ -483,6 +503,25 @@ class Selfcal:
 
 def _default_output(ms: str) -> str:
     return str(Path(ms).with_suffix("")) + "_selfcal"
+
+
+# A residual inside the source mask below this fraction of the thermal noise means the model and
+# the gains are fitting noise there
+OVERFITTING_FRACTION = 0.9
+
+
+def _warn_if_below_thermal(record: RoundRecord) -> None:
+    """
+    Warns when a round's residual inside the source mask is below the thermal noise (#119)
+    """
+    if record.rms_in_mask is None or record.thermal_noise is None:
+        return
+    if record.rms_in_mask < OVERFITTING_FRACTION * record.thermal_noise:
+        logger.warning(
+            "Round %d %s: the residual inside the source mask, %.3g mJy/beam, is below the "
+            "thermal noise, %.3g mJy/beam: the model and the gains may be fitting noise there",
+            record.index, record.step, record.rms_in_mask * 1e3, record.thermal_noise * 1e3
+        )
 
 
 def _describe(step: Optional[CalibrationStep]) -> str:

@@ -27,9 +27,10 @@ from wenuray.selfcalibration.steps import AmpPhasecal, Ampcal, Phasecal
 @dataclasses.dataclass(frozen=True)
 class FakeResult(ImagingResult):
     peak: float = 1.0
+    rms_in_mask: object = None
 
     def statistics(self):
-        return ImageStatistics(self.peak, 1e-3, 1.0, (1.0, 1.0, 0.0))
+        return ImageStatistics(self.peak, 1e-3, 1.0, (1.0, 1.0, 0.0), self.rms_in_mask)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -39,6 +40,7 @@ class FakeImager(Imager):
     calls: list = dataclasses.field(default_factory=list, hash=False)
     niter: int = 100
     spectral: bool = False
+    rms_in_mask: object = None
 
     @property
     def models_spectrum(self) -> bool:
@@ -46,7 +48,9 @@ class FakeImager(Imager):
 
     def _reconstruct(self, request):
         self.calls.append((Path(request.name).name, self.niter))
-        return FakeResult(request.name + ".image", "", "", peak=next(self.peaks))
+        return FakeResult(
+            request.name + ".image", "", "", peak=next(self.peaks), rms_in_mask=self.rms_in_mask
+        )
 
 
 @pytest.fixture
@@ -470,9 +474,9 @@ class TestPredictedSolutionSNR:
     """The pre-flight S/N estimate (#28): warned about when below minsnr, and recorded."""
 
     @staticmethod
-    def sample(noise, channels=(1, ), band=(5.0e9, 5.1e9)):
+    def sample(noise, channels=(1, ), band=(5.0e9, 5.1e9), weights=(2500.0, 2500.0)):
         from wenuray.selfcalibration.preflight import VisibilitySample
-        return VisibilitySample(1.0, noise, 8, 60.0, 7200.0, 7200.0, channels, 2, band)
+        return VisibilitySample(1.0, noise, 8, 60.0, 7200.0, 7200.0, channels, 2, band, weights)
 
     def test_is_recorded_for_each_step(self, casa):
         casa.sample = self.sample(0.05)
@@ -573,3 +577,50 @@ class TestTheRunIsRecorded:
         assert "can't be written as a recipe" in caplog.text
         assert result.provenance["recipe"] == ""
         assert not os.path.exists(str(Path(casa.ms).with_suffix("")) + "_selfcal/recipe.toml")
+
+
+class TestThermalNoise:
+    """The image's thermal noise from the data (#119), and residuals below it in the mask."""
+
+    @staticmethod
+    def sample():
+        # 0.05 Jy per visibility over 2500 equal weights: 1 mJy/beam
+        return TestPredictedSolutionSNR.sample(0.05)
+
+    def test_is_recorded_for_every_round(self, casa, caplog):
+        casa.sample = self.sample()
+
+        with caplog.at_level(logging.INFO, logger="wenuray"):
+            result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run()
+
+        assert [record.thermal_noise for record in result.rounds] == [pytest.approx(1e-3)] * 2
+        assert "Thermal noise from the data: 1 mJy/beam" in caplog.text
+        assert "Round 1 rms / thermal noise: 1.00" in caplog.text
+        assert SelfcalResult.from_toml(
+            str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
+        ) == result
+
+    def test_a_residual_below_thermal_inside_the_mask_warns(self, casa, caplog):
+        casa.sample = self.sample()
+
+        with caplog.at_level(logging.WARNING):
+            result = Selfcal(casa.ms, imager(1.0, 2.0, rms_in_mask=0.6e-3),
+                             [Phasecal("inf")]).run(observers=())
+
+        assert result.rounds[1].rms_in_mask == pytest.approx(0.6e-3)
+        assert "is below the thermal noise" in caplog.text
+        assert result.rounds[1].accepted  # a warning: acceptance is unchanged
+
+    def test_a_residual_at_thermal_does_not_warn(self, casa, caplog):
+        casa.sample = self.sample()
+
+        with caplog.at_level(logging.WARNING):
+            Selfcal(casa.ms, imager(1.0, 2.0, rms_in_mask=0.95e-3),
+                    [Phasecal("inf")]).run(observers=())
+
+        assert "below the thermal noise" not in caplog.text
+
+    def test_no_estimate_without_a_sample(self, casa):
+        result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run(observers=())
+
+        assert [record.thermal_noise for record in result.rounds] == [None, None]

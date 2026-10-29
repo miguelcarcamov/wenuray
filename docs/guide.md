@@ -39,6 +39,13 @@
   the solutions are precise enough (1 / S/N below the fractional bandwidth) to absorb α = 1. Give
   the imager a spectral model (tclean's `deconvolver="mtmfs"`, Pyralysis's `spectral_index`) or
   solve with `combine="spw"`.
+- **The noise floor.** After the initial image, Wenuray estimates the image's thermal noise from
+  the data: the noise of one visibility, from differences of consecutive integrations, averaged
+  down by the data weights (σ · √Σw² / Σw). It is exact for natural weighting and a floor for
+  briggs or uniform. Each round logs and records its residual noise against it (`thermal_noise`,
+  and `rms_in_mask` inside the source mask). A residual inside the mask below 0.9× thermal is
+  warned about: the model and the gains are fitting noise there. Image noise is always the MAD
+  standard deviation, since it is correlated by the beam and isn't Gaussian.
 - **A round is kept only if it improves the image.** By default the PSNR must rise and every
   solution interval must keep enough antennas (3 for phases, 4 for amplitudes), and amplitude
   rounds must not lose model flux. A rejected round is rolled back and stops the run.

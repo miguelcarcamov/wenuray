@@ -144,6 +144,23 @@ def test_the_solution_snr_sample_reads_the_simulated_noise(tmp_path):
     assert sample.band == pytest.approx((5.0e9 - 64e6, 5.0e9 + 64e6))  # one 128 MHz channel
 
 
+def test_the_thermal_noise_is_the_noise_of_a_naturally_weighted_residual(tmp_path):
+    """
+    The thermal noise predicted from the data matches the MAD std of tclean's residual of the
+    same data, with natural weighting (#119)
+    """
+    from wenuray.imaging.contract import ImagingRequest
+    from wenuray.selfcalibration.preflight import read_sample
+    from wenuray.config import Selection
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+    result = IMAGER.image(ImagingRequest(ms, str(tmp_path / "model")))
+
+    thermal = read_sample(ms, Selection()).thermal_noise
+
+    assert result.statistics().rms == pytest.approx(thermal, rel=0.15)
+
+
 def test_each_round_records_its_predicted_snr(accepted):
     assert accepted.rounds[0].predicted_snr is None
     assert all(record.predicted_snr > 3.0 for record in accepted.rounds[1:])

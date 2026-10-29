@@ -23,6 +23,7 @@ SAMPLE = VisibilitySample(
     channels=(4, 4, 8),
     parallel_hands=2,
     band=(336e9, 351e9),
+    weights=(1.0e4, 1.0e4),
 )
 ONE = 30.0
 
@@ -114,3 +115,18 @@ class TestAbsorbedSpectrum:
         one = dataclasses.replace(SAMPLE, channels=(8, ))
 
         assert self.check(AmpPhasecal("inf"), sample=one) == ""
+
+
+class TestThermalNoise:
+    """The image's thermal noise from the data (#119): noise * sqrt(sum w^2) / sum w."""
+
+    def test_equal_weights_average_the_noise_down(self):
+        # 10000 visibilities of 0.1 Jy
+        assert SAMPLE.thermal_noise == pytest.approx(1e-3)
+
+    def test_unequal_weights_count_less_than_their_number(self):
+        # Half the visibilities with twice the weight: 10000 of 1 and 10000 of 2
+        sample = dataclasses.replace(SAMPLE, weights=(3.0e4, 5.0e4))
+
+        assert sample.thermal_noise == pytest.approx(0.1 * math.sqrt(5.0e4) / 3.0e4)
+        assert sample.thermal_noise > 0.1 / math.sqrt(2.0e4)
