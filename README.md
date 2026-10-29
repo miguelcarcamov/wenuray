@@ -4,6 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/wenuray)](https://pypi.org/project/wenuray/)
 [![build](https://github.com/miguelcarcamov/wenuray/actions/workflows/build.yaml/badge.svg?branch=development)](https://github.com/miguelcarcamov/wenuray/actions/workflows/build.yaml)
 [![Docs](https://readthedocs.org/projects/wenuray/badge/?version=latest)](https://wenuray.readthedocs.io/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23775089.svg)](https://doi.org/10.5281/zenodo.23775089)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPLv3%2B-blue)](https://github.com/miguelcarcamov/wenuray/blob/development/LICENSE)
 
 **Self-calibration for radio interferometers, written once and run anywhere.**
@@ -262,13 +263,15 @@ version 1.0.
 
 If Wenuray helps your research, please cite it. GitHub's **Cite this repository** button (from
 [`CITATION.cff`](https://github.com/miguelcarcamov/wenuray/blob/development/CITATION.cff)) gives
-APA and BibTeX, or use:
+APA and BibTeX, or use the BibTeX below. The DOI, [10.5281/zenodo.23775089](https://doi.org/10.5281/zenodo.23775089), always
+resolves to the latest release; Zenodo gives each version its own DOI too.
 
 ```bibtex
 @software{wenuray,
   author = {Cárcamo, Miguel and Casassus, Simon},
   title = {Wenuray: radio-interferometric self-calibration},
   url = {https://github.com/miguelcarcamov/wenuray},
+  doi = {10.5281/zenodo.23775089},
   version = {<version>},
   year = {<year>}
 }
