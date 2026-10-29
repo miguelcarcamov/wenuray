@@ -102,6 +102,7 @@ wenuray = "wenuray.cli:main"
 
 # Project URLs (homepage, repository, documentation, etc.)
 [project.urls]
+Changelog = "https://github.com/miguelcarcamov/wenuray/blob/master/CHANGELOG.md"
 Homepage = "https://github.com/miguelcarcamov/wenuray"
 Repository = "https://github.com/miguelcarcamov/wenuray"
 Source = "https://github.com/miguelcarcamov/wenuray"
@@ -131,3 +132,42 @@ where = ["src"]
 [tool.setuptools_scm]
 # Don't add local version identifier (e.g., +dirty, +local)
 local_scheme = "no-local-version"
+
+# ============================================================================
+# towncrier Configuration
+# ============================================================================
+# Each pull request adds a news fragment, changes/<issue>.<type>.md (or changes/+<slug>.<type>.md
+# without an issue); `towncrier build --version X.Y.Z` collects them into CHANGELOG.md at release
+[tool.towncrier]
+directory = "changes"
+filename = "CHANGELOG.md"
+issue_format = "[#{issue}](https://github.com/miguelcarcamov/wenuray/issues/{issue})"
+name = "Wenuray"
+title_format = "## [{version}](https://github.com/miguelcarcamov/wenuray/releases/tag/v{version}) ({project_date})"
+underlines = ["", "", ""]
+wrap = false
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "Features"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Bug fixes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removal"
+name = "Removals and deprecations"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "doc"
+name = "Documentation"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "misc"
+name = "Packaging and maintenance"
+showcontent = true
