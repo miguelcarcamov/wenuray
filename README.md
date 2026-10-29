@@ -55,8 +55,9 @@ and replaces those scripts with a framework:
 - **Use any imager, not only tclean.** The imager is a plug-in: tclean,
   [Pyralysis](https://gitlab.com/clirai/pyralysis) (optimization-based reconstruction) or your own
   algorithm, all in the same loop.
-- **Extend it without forking it.** Acceptance rules, imagers and observers are classes you can
-  subclass and name in a recipe, so a new idea doesn't need a new script.
+- **Extend it without forking it.** Imagers, acceptance rules and observers are classes you can
+  subclass; imagers and acceptance rules of your own can be named in a recipe, so a new idea
+  doesn't need a new script.
 
 ## Installation
 
