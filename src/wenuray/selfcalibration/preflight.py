@@ -20,7 +20,7 @@ import numpy as np
 from casatools import ms as ms_tool_factory
 
 from ..config import Selection, SolveOptions
-from ..utils.selfcal_utils import open_table
+from ..utils.selfcal_utils import channel_edges, open_table
 from .acceptance import solution_snr
 from .steps import CalibrationStep
 
@@ -216,7 +216,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         dd_spw = dd_table.getcol("SPECTRAL_WINDOW_ID")
     with open_table(os.path.join(ms, "SPECTRAL_WINDOW")) as spw_table:
         all_channels = spw_table.getcol("NUM_CHAN")
-        edges = [_channel_edges(spw_table, spw) for spw in _selected_spws(indices, dd_spw, ddids)]
+        edges = [channel_edges(spw_table, spw) for spw in _selected_spws(indices, dd_spw, ddids)]
     channels = _selected_channels(indices, dd_spw, all_channels, ddids)
 
     weight_sum = sum(block["weights"][0] for block in blocks)
@@ -334,12 +334,3 @@ def _selected_spws(indices: dict, dd_spw: np.ndarray, data_ddids: np.ndarray) ->
     """
     ddids = indices["dd"] if len(indices["dd"]) else data_ddids
     return sorted({int(dd_spw[dd]) for dd in ddids})
-
-
-def _channel_edges(spw_table, spw: int) -> Tuple[float, float]:
-    """
-    The lowest and highest frequency a spectral window covers, channel widths included
-    """
-    frequencies = np.asarray(spw_table.getcell("CHAN_FREQ", spw))
-    half_widths = np.abs(np.asarray(spw_table.getcell("CHAN_WIDTH", spw))) / 2
-    return float(np.min(frequencies - half_widths)), float(np.max(frequencies + half_widths))

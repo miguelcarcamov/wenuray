@@ -164,3 +164,27 @@ def test_run_runs_the_recipe(capsys, recipe, monkeypatch):
     assert selfcal.solve == SolveOptions(refant="DA51")
     assert [type(observer).__name__ for observer in observers] == \
         ["LoggingObserver", "GainPlotObserver"]
+
+
+def test_apply_records_the_application_in_the_run(capsys, tmp_path, monkeypatch):
+    from wenuray.config import Selection
+    from wenuray.selfcalibration import SelfcalResult
+    from wenuray.selfcalibration import result as result_module
+    from wenuray.selfcalibration.application import Application
+    from wenuray.selfcalibration.caltable import CalStack, CalTable
+
+    monkeypatch.setattr(
+        result_module, "apply_to",
+        lambda stack, ms, selection, applymode: Application(ms, selection, applymode, stack, "")
+    )
+    run = tmp_path / "target_selfcal"
+    run.mkdir()
+    SelfcalResult(str(tmp_path / "target.ms"),
+                  CalStack([CalTable(str(run / "p.cal"), "p")])).to_toml(str(run / "selfcal.toml"))
+
+    result = wenuray(capsys, "apply", str(run), "--ms", str(tmp_path / "line.ms"), "--spw", "1")
+
+    assert result.status == 0 and "1 tables applied" in result.out
+    (application, ) = SelfcalResult.from_toml(str(run / "selfcal.toml")).applications
+    assert application.ms == str(tmp_path / "line.ms"
+                                 ) and application.selection == Selection(spw="1")

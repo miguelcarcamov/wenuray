@@ -108,6 +108,33 @@ class SolveOptions:
 
 
 @dataclass(frozen=True)
+class ApplyTarget:
+    """
+    Other data the accepted calibration is applied to after the run (#68), e.g. the line data
+
+    Parameters
+    ----------
+    ms :
+        Measurement set of the same observation: the run's own for other spectral windows, or
+        another one, e.g. split with other spectral windows. Its spectral windows are matched to
+        the tables' by frequency
+    selection :
+        The data to calibrate. An empty spw selects the spectral windows that hold data
+    """
+    ms: str
+    selection: Selection = Selection()
+
+    def __post_init__(self):
+        _require_str(self, "ms")
+        if not self.ms:
+            raise ValueError("An apply target needs a measurement set")
+        if isinstance(self.selection, Mapping):
+            object.__setattr__(self, "selection", Selection(**self.selection))
+        if not isinstance(self.selection, Selection):
+            raise TypeError("selection must be a Selection, not {0!r}".format(self.selection))
+
+
+@dataclass(frozen=True)
 class ApplyOptions:
     """
     applycal options. Each accepted table records the interpolation it is applied with.
@@ -118,12 +145,24 @@ class ApplyOptions:
         "calflag" also flags the data whose solutions failed minsnr
     interp :
         Temporal interpolation of the solutions, e.g. "linear" or "nearest"
+    targets :
+        Other data the accepted calibration is applied to when the run ends, with applymode (#68)
     """
     applymode: str = "calflag"
     interp: str = "linear"
+    targets: Tuple[ApplyTarget, ...] = ()
 
     def __post_init__(self):
         _require_str(self, "applymode", "interp")
+        object.__setattr__(
+            self, "targets",
+            tuple(
+                ApplyTarget(**target) if isinstance(target, Mapping) else target
+                for target in self.targets
+            )
+        )
+        if not all(isinstance(target, ApplyTarget) for target in self.targets):
+            raise TypeError("targets must be ApplyTargets, not {0!r}".format(self.targets))
         if self.applymode not in APPLY_MODES:
             raise ValueError(
                 "applymode must be one of {0}, not {1!r}".format(APPLY_MODES, self.applymode)

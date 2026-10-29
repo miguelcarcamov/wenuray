@@ -6,7 +6,7 @@ import pytest
 import tomli_w
 
 from wenuray.config import (
-    ApplyOptions, ImageGeometry, Selection, SolveOptions, Weighting, to_dict
+    ApplyOptions, ApplyTarget, ImageGeometry, Selection, SolveOptions, Weighting, to_dict
 )
 
 CONFIGS = [Selection, SolveOptions, ApplyOptions, ImageGeometry, Weighting]
@@ -31,6 +31,7 @@ def test_replace_rejects_unknown_names(config):
         Selection(field="target", spw="1~3", uvrange=">50klambda"),
         SolveOptions(refant="DA51", minblperant=6, minsnr=2.5, gaintype="G", combine="spw"),
         ApplyOptions(applymode="calonly", interp="nearest"),
+        ApplyOptions(targets=(ApplyTarget("line.ms", Selection(spw="4")), ApplyTarget("b.ms"))),
         ImageGeometry(imsize=(1024, 512), cell="0.05arcsec", phasecenter="J2000 10h00m +30d00m"),
         ImageGeometry(),
         Weighting(weighting="briggs", robust=-0.5, uvtaper=("0.1arcsec", )),
@@ -76,5 +77,24 @@ def test_single_uvtaper_string_becomes_a_tuple():
     ]
 )
 def test_invalid_values_raise_at_construction(build, match):
+    with pytest.raises((TypeError, ValueError), match=match):
+        build()
+
+
+def test_apply_targets_are_built_from_tables():
+    options = ApplyOptions(targets=[{"ms": "line.ms", "selection": {"spw": "4"}}])
+
+    assert options.targets == (ApplyTarget("line.ms", Selection(spw="4")), )
+
+
+@pytest.mark.parametrize(
+    "build, match",
+    [
+        (lambda: ApplyTarget(""), "measurement set"),
+        (lambda: ApplyOptions(targets=["line.ms"]), "ApplyTarget"),
+        (lambda: ApplyTarget("line.ms", selection="4"), "Selection"),
+    ],
+)
+def test_invalid_apply_targets_raise(build, match):
     with pytest.raises((TypeError, ValueError), match=match):
         build()

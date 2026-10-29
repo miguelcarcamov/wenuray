@@ -205,6 +205,8 @@ class Selfcal:
                 table[name] = fields[name]
         if len(self.initial_stack):
             table["initial_stack"] = self.initial_stack.to_dict(relative_to=relative_to)
+        for target in table.get("apply", {}).get("targets", []):
+            target["ms"] = path(target["ms"])
         return table
 
     def to_toml(self, path: Union[str, os.PathLike]) -> None:
@@ -309,6 +311,13 @@ class Selfcal:
         workspace.discard(*snapshots)
         selfcal_result = SelfcalResult(self.ms, stack, rounds, provenance)
         selfcal_result.to_toml(record_path)
+        # Other data calibrated with the accepted stack (#68); the record is rewritten after each,
+        # so a failing target leaves the run and the earlier applications recorded
+        for target in self.apply.targets:
+            selfcal_result = selfcal_result.apply_to(
+                target.ms, target.selection, self.apply.applymode
+            )
+            selfcal_result.to_toml(record_path)
         _notify(observers, "on_finished", selfcal_result)
         return selfcal_result
 
