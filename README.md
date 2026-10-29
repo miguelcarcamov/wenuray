@@ -260,11 +260,13 @@ version 1.0.
 
 ## Citing Wenuray
 
-If Wenuray helps your research, please cite it:
+If Wenuray helps your research, please cite it. GitHub's **Cite this repository** button (from
+[`CITATION.cff`](https://github.com/miguelcarcamov/wenuray/blob/development/CITATION.cff)) gives
+APA and BibTeX, or use:
 
 ```bibtex
 @software{wenuray,
-  author = {Cárcamo, Miguel},
+  author = {Cárcamo, Miguel and Casassus, Simon},
   title = {Wenuray: radio-interferometric self-calibration},
   url = {https://github.com/miguelcarcamov/wenuray},
   version = {<version>},
