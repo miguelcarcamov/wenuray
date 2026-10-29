@@ -11,9 +11,11 @@ abstract: >-
 authors:
   - family-names: Cárcamo
     given-names: Miguel
+    affiliation: Universidad de Santiago de Chile
     orcid: https://orcid.org/0000-0003-0564-8167
   - family-names: Casassus
     given-names: Simon
+    affiliation: Universidad de Chile
     orcid: https://orcid.org/0000-0002-0433-9840
 repository-code: https://github.com/miguelcarcamov/wenuray
 url: https://wenuray.readthedocs.io/
