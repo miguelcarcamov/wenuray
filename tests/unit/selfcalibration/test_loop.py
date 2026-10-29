@@ -624,3 +624,33 @@ class TestThermalNoise:
         result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run(observers=())
 
         assert [record.thermal_noise for record in result.rounds] == [None, None]
+
+
+class TestApplyTargets:
+    """The accepted calibration applied to other data when the run ends (#68)."""
+
+    def test_each_target_is_applied_and_recorded(self, casa, monkeypatch, tmp_path):
+        from wenuray.config import ApplyOptions, ApplyTarget
+        from wenuray.selfcalibration import result as result_module
+        from wenuray.selfcalibration.application import Application
+        applied = []
+
+        def apply_to(stack, ms, selection, applymode):
+            applied.append((len(stack), ms, selection.spw, applymode))
+            return Application(ms, selection, applymode, stack, "sha256:abc")
+
+        monkeypatch.setattr(result_module, "apply_to", apply_to)
+        line = str(tmp_path / "line.ms")
+        options = ApplyOptions(
+            applymode="calonly", targets=(ApplyTarget(line, Selection(spw="1")), )
+        )
+
+        result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")],
+                         apply=options).run(observers=())
+
+        assert applied == [
+            (1, line, "1", "calonly")
+        ]  # the accepted stack, with the run's applymode
+        assert SelfcalResult.from_toml(
+            str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
+        ).applications == result.applications

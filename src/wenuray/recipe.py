@@ -306,6 +306,9 @@ def read(path: str, _seen: tuple = ()) -> dict:
             recipe[name] = os.path.normpath(os.path.join(directory, recipe[name]))
     for table in recipe.get("initial_stack", {}).get("tables", []):
         table["path"] = os.path.normpath(os.path.join(directory, table["path"]))
+    for target in recipe.get("apply", {}).get("targets", []):
+        if isinstance(target, dict) and isinstance(target.get("ms"), str):
+            target["ms"] = os.path.normpath(os.path.join(directory, target["ms"]))
     preset = recipe.pop("preset", None)
     base = read(preset, _seen + (path, )) if preset is not None else {}
     _resolve_imager_files(recipe, base, directory)

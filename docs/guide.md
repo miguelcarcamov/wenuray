@@ -54,6 +54,35 @@
 - **`result.final`** is the last accepted round; every round's metrics, decision and reasons are in
   `result.rounds` and in `<output>/selfcal.toml`.
 
+## Calibrating other data
+
+Self-calibration usually runs on the continuum; the accepted tables then go to the line data,
+other spectral windows, or another measurement set of the same observation. List them in the run:
+
+```toml
+[[apply.targets]]
+ms = "line.ms"            # relative to the recipe
+selection = { spw = "" }  # the spectral windows that hold data
+```
+
+or, in Python, `ApplyOptions(targets=(ApplyTarget("line.ms"), ))`. When the run ends, each target
+gets the accepted stack with the run's `applymode`. After a run, `result.apply_to("line.ms")` or
+`wenuray apply target_selfcal --ms line.ms` does the same. Each application is recorded in
+`selfcal.toml` (`[[applications]]`: the target, its selection, the tables with their spwmaps, and a
+fingerprint of the target).
+
+A split measurement set renumbers its spectral windows, so they are matched to the tables' by
+frequency, never by id:
+
+- a table solved with `combine="spw"` holds one solution for the band, which every target spectral
+  window takes;
+- a table solved per spectral window calibrates a target spectral window from the solved one that
+  overlaps it in frequency. If none does, Wenuray raises an error naming the nearest one: per-window
+  gains at another frequency would be a guess. Solve with `combine="spw"` to calibrate other
+  frequencies.
+
+The target must hold the tables' antennas, by the same ids, and overlap their times.
+
 ## Recipes
 
 A recipe is the same objects written as TOML: each table is a constructor and its keys are that
@@ -114,7 +143,8 @@ reruns it on a fresh copy of the input. A run Wenuray can't write as a recipe, e
 
 ### Configuration (`wenuray.config`)
 
-Frozen objects with CASA's parameter names: `Selection`, `SolveOptions`, `ApplyOptions`,
+Frozen objects with CASA's parameter names: `Selection`, `SolveOptions`, `ApplyOptions` (with its
+`ApplyTarget`s),
 `ImageGeometry` and `Weighting` (natural by default).
 
 ### Imaging (`wenuray.imaging`)

@@ -6,7 +6,7 @@ import textwrap
 import pytest
 
 from wenuray import recipe
-from wenuray.config import ImageGeometry, Selection, SolveOptions, Weighting
+from wenuray.config import ApplyOptions, ApplyTarget, ImageGeometry, Selection, SolveOptions, Weighting
 from wenuray.imaging.backends import Tclean
 from wenuray.imaging.backends import pyralysis as pyralysis_backend
 from wenuray.imaging.backends.pyralysis import Pyralysis
@@ -125,12 +125,16 @@ class TestRecipeAndScriptAgree:
             ],
             acceptance=AllOf(PSNRImproves(), EnoughAntennas(max_short_fraction=0.1)),
             initial_stack=CalStack([CalTable(str(tmp_path / "data" / "p.cal"), "p", (0, 0), "")]),
+            apply=ApplyOptions(
+                targets=(ApplyTarget(str(tmp_path / "data" / "line.ms"), Selection(spw="4")), )
+            ),
         )
         os.makedirs(tmp_path / "recipes")
         run.to_toml(tmp_path / "recipes" / "run.toml")
 
         text = (tmp_path / "recipes" / "run.toml").read_text()
         assert 'path = "../data/p.cal"' in text
+        assert 'ms = "../data/line.ms"' in text  # apply targets are relative to the recipe too
         assert Selfcal.from_toml(tmp_path / "recipes" / "run.toml") == run
 
 

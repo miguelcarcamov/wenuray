@@ -4,6 +4,7 @@ round, written as TOML next to the run's outputs so the run can be reproduced an
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -11,6 +12,8 @@ from typing import Mapping, Optional, Tuple
 
 import tomli_w
 
+from ..config import Selection
+from .application import Application, apply_to
 from .caltable import CalStack
 
 
@@ -92,14 +95,48 @@ class SelfcalResult:
     provenance :
         How the run can be reproduced (#36): when it started, the recipe written next to the
         result, a fingerprint of the input data (ms_fingerprint) and the software versions
+    applications :
+        Other data the accepted calibration was applied to (#68), in order
     """
     ms: str
     stack: CalStack
     rounds: Tuple[RoundRecord, ...] = field(default=())
     provenance: Mapping = field(default_factory=dict, hash=False)
+    applications: Tuple[Application, ...] = field(default=())
 
     def __post_init__(self):
         object.__setattr__(self, "rounds", tuple(self.rounds))
+        object.__setattr__(self, "applications", tuple(self.applications))
+
+    def apply_to(
+        self,
+        ms: str,
+        selection: Selection = Selection(),
+        applymode: str = "calflag"
+    ) -> SelfcalResult:
+        """
+        Applies the accepted calibration to other data of the same observation, e.g. the line
+        data, and returns the result with the application recorded (write it with to_toml). Each
+        table's spwmap is derived for ms: its spectral windows are matched to the tables' by
+        frequency, so a split measurement set works.
+
+        Parameters
+        ----------
+        ms :
+            The measurement set to calibrate; its CORRECTED_DATA is written
+        selection :
+            The data to calibrate. An empty spw selects the spectral windows that hold data
+        applymode :
+            applycal's applymode
+
+        Raises
+        ------
+        ValueError
+            If ms doesn't hold the tables' antennas and times, or a table solved per spectral
+            window has no solutions at a selected spectral window's frequencies
+        """
+        application = apply_to(self.stack, os.path.abspath(ms), selection, applymode)
+        return dataclasses.replace(self, applications=self.applications + (application, ))
 
     @property
     def accepted_rounds(self) -> Tuple[RoundRecord, ...]:
@@ -152,6 +189,16 @@ class SelfcalResult:
         }
         if self.provenance:
             data["provenance"] = dict(self.provenance)
+        if self.applications:
+            data["applications"] = [
+                {
+                    "ms": relative(application.ms),
+                    "selection": dataclasses.asdict(application.selection),
+                    "applymode": application.applymode,
+                    "fingerprint": application.fingerprint,
+                    "stack": application.stack.to_dict(relative_to=base),
+                } for application in self.applications
+            ]
         with open(path, "wb") as file:
             tomli_w.dump(data, file)
 
@@ -175,9 +222,16 @@ class SelfcalResult:
                 }
             ) for entry in data.get("rounds", [])
         ]
+        applications = [
+            Application(
+                absolute(entry["ms"]), Selection(**entry["selection"]), entry["applymode"],
+                CalStack.from_dict(entry["stack"], relative_to=base), entry.get("fingerprint", "")
+            ) for entry in data.get("applications", [])
+        ]
         return cls(
             absolute(data["ms"]),
             CalStack.from_dict(data["stack"], relative_to=base),
             rounds,
             data.get("provenance", {}),
+            applications,
         )

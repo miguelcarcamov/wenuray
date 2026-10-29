@@ -5,6 +5,7 @@ The wenuray command (#36), a thin layer over the recipes of wenuray.recipe:
     wenuray validate selfcal.toml       builds the run and checks it, without touching the data
     wenuray show selfcal.toml           the recipe with its presets laid in (--defaults: all values)
     wenuray run selfcal.toml            runs it
+    wenuray apply out --ms line.ms      applies a run's calibration to other data (#68)
 
 --ms and --output reuse a recipe for another dataset. Errors are the constructors' own, as from
 Python, and exit with status 1.
@@ -87,6 +88,18 @@ def _parser() -> argparse.ArgumentParser:
     recipe_command("validate", "build a recipe's run and check it, without touching the data")
     show = recipe_command("show", "print a recipe with its presets laid in")
     show.add_argument("--defaults", action="store_true", help="also print the default values")
+    apply = commands.add_parser(
+        "apply",
+        help="apply a run's accepted calibration to other data of the same observation",
+        description="apply a run's accepted calibration to other data of the same observation; "
+        "the application is recorded in the run's selfcal.toml"
+    )
+    apply.add_argument("run", help="the run's output directory, or its selfcal.toml")
+    apply.add_argument("--ms", required=True, help="measurement set to calibrate")
+    apply.add_argument("--field", default="", help="field selection")
+    apply.add_argument("--spw", default="", help="spw selection (default: those with data)")
+    apply.add_argument("--uvrange", default="", help="uv-range selection")
+    apply.add_argument("--applymode", default="calflag", help="applycal's applymode")
     init = commands.add_parser("init", help="write a generic recipe to start from")
     init.add_argument("-o", "--output", help="file to write instead of the standard output")
     return parser
@@ -147,6 +160,25 @@ def _show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _apply(args: argparse.Namespace) -> int:
+    from .config import Selection
+    from .selfcalibration import SelfcalResult
+
+    logging.basicConfig(level=logging.INFO)
+    record = os.path.join(args.run, "selfcal.toml") if os.path.isdir(args.run) else args.run
+    result = SelfcalResult.from_toml(record).apply_to(
+        args.ms, Selection(args.field, args.spw, args.uvrange), args.applymode
+    )
+    result.to_toml(record)
+    application = result.applications[-1]
+    print(
+        "{0} tables applied to {1}; recorded in {2}".format(
+            len(application.stack), application.ms, record
+        )
+    )
+    return 0
+
+
 def _init(args: argparse.Namespace) -> int:
     if args.output is None:
         sys.stdout.write(TEMPLATE)
@@ -158,7 +190,7 @@ def _init(args: argparse.Namespace) -> int:
     return 0
 
 
-COMMANDS = {"run": _run, "validate": _validate, "show": _show, "init": _init}
+COMMANDS = {"run": _run, "validate": _validate, "show": _show, "apply": _apply, "init": _init}
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
