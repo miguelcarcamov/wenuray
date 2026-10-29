@@ -52,6 +52,9 @@ class RoundRecord:
     thermal_noise :
         Thermal noise of the image, from the data (#119), if it could be estimated: the floor rms
         approaches. For briggs or uniform weighting it is the natural-weighting floor
+    noise_over_sigma :
+        Initial image only: the median over baselines of the data's measured noise over the noise
+        their SIGMA states (#129); near 1 when the weights are right
     """
     index: int
     step: str
@@ -69,6 +72,7 @@ class RoundRecord:
     predicted_snr: Optional[float] = None
     rms_in_mask: Optional[float] = None
     thermal_noise: Optional[float] = None
+    noise_over_sigma: Optional[float] = None
 
     def __post_init__(self):
         if self.beam is not None:
@@ -178,7 +182,7 @@ class SelfcalResult:
                 entry["beam"] = list(record.beam)
             if record.data_flagged is not None:
                 entry["data_flagged"] = list(record.data_flagged)
-            for name in ("predicted_snr", "rms_in_mask", "thermal_noise"):
+            for name in ("predicted_snr", "rms_in_mask", "thermal_noise", "noise_over_sigma"):
                 if getattr(record, name) is not None:
                     entry[name] = getattr(record, name)
             rounds.append(entry)

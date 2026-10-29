@@ -203,3 +203,29 @@ def test_the_fingerprint_changes_with_the_data(tmp_path):
         tb.close()
 
     assert ms_fingerprint(ms) != before
+
+
+@pytest.mark.parametrize("sigma, expected", [(0.05, 1.0), (0.05 / np.sqrt(2), np.sqrt(2))])
+def test_the_noise_over_sigma_measures_how_wrong_the_weights_are(tmp_path, sigma, expected):
+    """0.05 Jy noise per part of each visibility; SIGMA set right, then sqrt(2) too small (#129)"""
+    from casatools import table
+    from wenuray.config import Selection
+    from wenuray.imaging.contract import ImagingRequest
+    from wenuray.selfcalibration.preflight import read_sample, weight_anomalies
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+    tool = table()
+    tool.open(ms, nomodify=False)
+    try:
+        tool.putcol("SIGMA", np.full_like(tool.getcol("SIGMA"), sigma))
+    finally:
+        tool.close()
+    tool.done()
+    IMAGER.image(ImagingRequest(ms, str(tmp_path / "model")))
+
+    sample = read_sample(ms, Selection())
+
+    ratios = [ratio for *_, ratio in sample.noise_over_sigma]
+    assert len(ratios) == 28  # every baseline of the 8 antennas
+    assert np.median(ratios) == pytest.approx(expected, rel=0.05)
+    assert bool(weight_anomalies(sample)) == bool(expected > 1.1)
