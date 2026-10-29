@@ -155,9 +155,15 @@ jobs:
     - name: Fetch CASA measures data
       if: steps.casa-data.outputs.cache-hit != 'true'
       run: |
+        # The packages are installed by tox later, so the script's own imports come first (#109)
+        python -m pip install $(grep -E '^(casaconfig|certifi)==' requirements.txt)
         mkdir -p ~/.casa/data
-        # A slow or failing server is fine if an earlier day's copy was restored from the cache
-        python tools/fetch_casa_data.py ~/.casa/data || test -d ~/.casa/data/geodetic/Observatories
+        # A slow or failing server is fine if an earlier day's copy was restored from the cache,
+        # but it is reported: the tests then run on older measures
+        if ! python tools/fetch_casa_data.py ~/.casa/data; then
+          test -d ~/.casa/data/geodetic/Observatories
+          echo "::warning::CASA data fetch failed; using the copy restored from the cache"
+        fi
     - name: Turn CASA data auto updates off
       run: |
         mkdir -p ~/.casa
