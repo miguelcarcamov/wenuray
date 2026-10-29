@@ -17,6 +17,11 @@ authors:
     given-names: Simon
     affiliation: Universidad de Chile
     orcid: https://orcid.org/0000-0002-0433-9840
+doi: 10.5281/zenodo.23775089
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23775089
+    description: Concept DOI, resolving to the latest release on Zenodo
 repository-code: https://github.com/miguelcarcamov/wenuray
 url: https://wenuray.readthedocs.io/
 license: GPL-3.0-or-later
