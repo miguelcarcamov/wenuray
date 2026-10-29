@@ -163,14 +163,25 @@ def get_spw_ids(ms_name: str = "", spw: str = "") -> list:
         Measurement set name
     spw :
         CASA spectral window selection, e.g. "0~3" or "1,3:10~20". Empty selects every spectral
-        window
+        window that holds data
 
     Returns
     -------
     Sorted list of selected spectral window ids
     """
     if spw in ("", "*"):
-        return list(range(count_spectral_windows(ms_name)))
+        # The windows the data use, not every SPECTRAL_WINDOW row: data split from a larger
+        # measurement set keep their original ids (e.g. ALMA's 13, 15, 17, 19), and gaincal writes
+        # spw-combined solutions under the lowest of them
+        with open_table(ms_name) as ms_table:
+            used = ms_table.query(query="", columns="DISTINCT DATA_DESC_ID")
+            try:
+                data_descriptions = used.getcol("DATA_DESC_ID")
+            finally:
+                used.close()
+        with open_table(ms_name + "/DATA_DESCRIPTION") as description_table:
+            spw_of = description_table.getcol("SPECTRAL_WINDOW_ID")
+        return sorted({int(spw_of[description]) for description in data_descriptions})
     ms_tool = ms()
     try:
         selection = ms_tool.msseltoindex(vis=ms_name, spw=spw)
