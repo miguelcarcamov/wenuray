@@ -58,6 +58,9 @@ class VisibilitySample:
     band :
         Lowest and highest frequency of the selected spectral windows, channel edges included, in
         Hz
+    weights :
+        Sums of the data weights and of their squares over the selected, unflagged visibilities of
+        the parallel hands (every channel counted), from the sample scaled to the whole selection
     """
     signal: float
     noise: float
@@ -68,11 +71,24 @@ class VisibilitySample:
     channels: Tuple[int, ...]
     parallel_hands: int
     band: Tuple[float, float]
+    weights: Tuple[float, float]
 
     @property
     def fractional_bandwidth(self) -> float:
         low, high = self.band
         return 2 * (high - low) / (high + low)
+
+    @property
+    def thermal_noise(self) -> float:
+        """
+        The thermal noise of a Stokes I image of the selection, in Jy/beam (#119). A pixel of the
+        dirty image is a weighted mean of the visibilities' real parts, so its noise is
+        noise * sqrt(sum w^2) / sum w. The weights are the data weights: exact for natural
+        weighting, and its floor (a lower bound) for briggs or uniform. The noise comes from the
+        data rather than from the weights, which often misstate it
+        """
+        total, squares = self.weights
+        return self.noise * math.sqrt(squares) / total
 
 
 @dataclass(frozen=True)
@@ -203,6 +219,9 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         edges = [_channel_edges(spw_table, spw) for spw in _selected_spws(indices, dd_spw, ddids)]
     channels = _selected_channels(indices, dd_spw, all_channels, ddids)
 
+    weight_sum = sum(block["weights"][0] for block in blocks)
+    weight_squares = sum(block["weights"][1] for block in blocks)
+    sampled = sum(block["rows"] for block in blocks)
     model = np.concatenate([block["model"] for block in blocks])
     differences = np.concatenate([_differences(block, interval) for block in blocks])
     antennas = np.unique(np.concatenate([block["antennas"] for block in blocks]))
@@ -210,7 +229,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         return None
     components = np.concatenate([differences.real, differences.imag])
     noise = MAD_TO_SIGMA * np.median(np.abs(components - np.median(components))) / math.sqrt(2)
-    if not noise > 0:
+    if not noise > 0 or not weight_sum > 0:
         return None
     scan_lengths = [
         times[scans == scan].max() - times[scans == scan].min() + interval
@@ -226,6 +245,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         channels=tuple(int(n) for n in channels),
         parallel_hands=blocks[0]["parallel_hands"],
         band=(min(low for low, _ in edges), max(high for _, high in edges)),
+        weights=(weight_sum * nrows / sampled, weight_squares * nrows / sampled),
     )
 
 
@@ -251,6 +271,9 @@ def _read_block(selected, start: int, nrow: int) -> dict:
     antenna2 = selected.getcol("ANTENNA2", startrow=start, nrow=nrow)
     good = ~flags[hands]
     unflagged_rows = good.any(axis=(0, 1))
+    # One weight per correlation and row, shared by its channels
+    weights = selected.getcol("WEIGHT", startrow=start, nrow=nrow)[hands]
+    unflagged_channels = good.sum(axis=1)
     return {
         "model": np.abs(model[hands])[good],
         "data": data[hands],
@@ -260,6 +283,11 @@ def _read_block(selected, start: int, nrow: int) -> dict:
         "time": selected.getcol("TIME", startrow=start, nrow=nrow),
         "antennas": np.concatenate([antenna1[unflagged_rows], antenna2[unflagged_rows]]),
         "parallel_hands": len(hands),
+        "weights": (
+            float(np.sum(weights * unflagged_channels)),
+            float(np.sum(weights**2 * unflagged_channels))
+        ),
+        "rows": nrow,
     }
 
 
