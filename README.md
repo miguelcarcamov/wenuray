@@ -1,125 +1,126 @@
 # Wenuray
 
-## Radio-interferometric self-calibration
+[![PyPI](https://img.shields.io/pypi/v/wenuray)](https://pypi.org/project/wenuray/)
+[![Python](https://img.shields.io/pypi/pyversions/wenuray)](https://pypi.org/project/wenuray/)
+[![build](https://github.com/miguelcarcamov/wenuray/actions/workflows/build.yaml/badge.svg?branch=development)](https://github.com/miguelcarcamov/wenuray/actions/workflows/build.yaml)
+[![Docs](https://readthedocs.org/projects/wenuray/badge/?version=latest)](https://wenuray.readthedocs.io/)
+[![License: GPL v3+](https://img.shields.io/badge/license-GPLv3%2B-blue)](https://github.com/miguelcarcamov/wenuray/blob/development/LICENSE)
 
-**Wenuray** is a Python framework for radio-interferometric self-calibration. Instead of
-rewriting a calibration script for each dataset, you describe the procedure once, as a short TOML
-recipe or a few Python objects, and Wenuray runs it: imaging with CASA tclean, Pyralysis or your
-own imager, solving phases and amplitudes round after round, and keeping only the rounds that
-improve the image. It works with any radio interferometer.
+**Self-calibration for radio interferometers, written once and run anywhere.**
 
-### About the name
+Wenuray lets you describe a self-calibration procedure as a short recipe (a dozen lines of TOML or
+a few Python objects) and runs it on any measurement set, from any array. It images with CASA
+tclean, Pyralysis or your own imager, solves for phases and then amplitudes round after round, and
+keeps a round only if it really improves the image. Every run records what it did, so you or a
+referee can repeat it exactly.
 
-*Wenuray* (also written *Huenuray*) is a Mapuche woman's name. In Mapudungun it means **"flower of
-the sky"**: *wenu*, the sky, and *rayen*, flower. The radio sky is what Wenuray brings into focus,
-and its roots are in Chile, home of many of the world's radio telescopes.
+## Why self-calibration?
 
-Wenuray is dedicated to the women of radio astronomy. Each major release carries one of their
-names, beginning with **v1.0 "Payne-Scott"**, after Ruby Payne-Scott (1912–1981), the first woman
-radio astronomer and a pioneer of radio interferometry.
+An interferometer measures visibilities, and every antenna *i* multiplies what it sees by its own
+complex gain *gᵢ(t, ν)*:
 
-Wenuray was called *snow* (ca**S**a pytho**N** self-calibrati**O**n frame**W**ork) before
-version 1.0.
+```text
+V_ij(observed) = g_i · g_j* · V_ij(true) + noise
+```
 
-### Features
+Calibrating against a calibrator source removes most of those gains, but not all of them. The
+atmosphere and the ionosphere change faster than the calibrator cycle, and the calibrator is in
+another part of the sky. What's left over shows up as stripes, sidelobes and a noise floor far
+above the thermal limit.
 
-- **Object-oriented design**: Clean, modular architecture for easy customization
-- **Multiple imagers supported**: CASA tclean, Pyralysis, or your own
-- **Flexible self-calibration**: Phase-only, amplitude-only, or combined amplitude-phase calibration
-- **CASA integration**: Built on CASA (Common Astronomy Software Applications) for radio astronomy data processing
-- **Reproducible workflows**: Version-controlled calibration pipelines
-- **Docker support**: Pre-built container images for easy deployment
+Self-calibration uses the target itself. An array of *N* antennas has *N(N−1)/2* baselines but only
+*N* unknown gains, so even an imperfect model of the sky constrains the gains well. The loop is:
 
-## Requirements
+1. **Image** the data and keep the model.
+2. **Solve** for the antenna gains that best match the data to that model (`gaincal`).
+3. **Apply** them and image again. If the image is better, keep the solution and go on with a
+   shorter interval or with amplitudes; if not, roll it back.
 
-- **Python**: `>=3.11, <3.14`, the versions with both CASA wheels and Pyralysis support. On 3.11,
-  CASA 6.7.0 is the newest release with wheels; 3.12 and 3.13 get the latest CASA
-- **Dependencies**: casatools, casatasks (CASA >= 6.7), numpy, astropy and reproject. The
-  package declares lower bounds; [`requirements.txt`](https://github.com/miguelcarcamov/wenuray/blob/development/requirements.txt) pins the set tested in CI
-  and used in the Docker images.
-- **CASA data**: CASA downloads its measures data the first time `casatools` is imported
-  (see [External Data](https://casadocs.readthedocs.io/en/stable/notebooks/external-data.html)).
-  Without network access, point `measurespath` to an existing copy.
-
-On Debian, Ubuntu or Arch, the `manylinux_2_34` casatools wheel that pip picks fails to import
-(`OPENSSL_3.0.1 not found`). Install from `requirements.txt`, which uses the working
-`manylinux_2_28` wheel, or install that wheel first.
+Doing this by hand is a script full of choices: solution intervals, reference antennas, which
+tables to pre-apply with which `spwmap`, when to stop. Wenuray turns those choices into a recipe
+it checks against self-calibration theory before it touches your data. For example, it refuses an
+amplitude round with no phase solution before it, and it warns when a solution interval is too
+short to reach your `minsnr`.
 
 ## Installation
-
-### Option 1: From PyPI (Recommended)
 
 ```bash
 pip install wenuray
 ```
 
-Release candidates are on PyPI too, and pip installs them only when asked:
-`pip install --pre wenuray`.
+You need Python 3.11, 3.12 or 3.13 on Linux or macOS, the platforms CASA ships wheels for. Conda,
+Docker, source installs and the optional extras (Pyralysis, plots) are in the
+[installation guide](https://github.com/miguelcarcamov/wenuray/blob/development/docs/installation.md).
 
-### Option 2: From GitHub
+> **Debian, Ubuntu or Arch?** The casatools wheel pip picks by default fails to import there
+> (`OPENSSL_3.0.1 not found`). From a clone, `pip install -r requirements.txt .` pins a wheel that
+> works.
 
-```bash
-pip install -U git+https://github.com/miguelcarcamov/wenuray.git
+## Quick start
+
+Your data should already be calibrated, and the target split out so that the calibrated
+visibilities sit in `DATA`:
+
+```python
+split(vis="calibrated.ms", outputvis="target.ms", field="my_target", datacolumn="corrected")
 ```
 
-### Option 3: Using Conda
+### Your first recipe
 
-Create a conda environment from the provided environment file:
+Phase, then amplitude-phase self-calibration of an ALMA dataset. The values (cell size, threshold,
+reference antenna) belong to this dataset; adapt them to yours.
 
-```bash
-conda env create -f environment.yml
-conda activate wenuray-env
+```toml
+ms = "target.ms"           # paths are relative to the recipe
+output = "target_selfcal"
+
+[solve]
+refant = "DA51"
+minblperant = 6
+
+[imager]
+type = "tclean"
+niter = 100
+threshold = "0.1mJy"
+deconvolver = "hogbom"
+usemask = "auto-multithresh"
+geometry = { imsize = 1024, cell = "0.005arcsec" }
+weighting = { weighting = "briggs", robust = 0.5 }
+
+[[steps]]
+type = "phase"             # Phasecal; "amp" is Ampcal, "ampphase" AmpPhasecal
+solint = "inf"
+solve = { combine = "spw" }
+
+[[steps]]
+type = "phase"
+solint = "600s"
+solve = { combine = "spw" }
+
+[[steps]]
+type = "ampphase"
+solint = "inf"
+imaging = { threshold = "0.025mJy" }
 ```
 
-The environment provides Python 3.12 and the pinned dependencies from `requirements.txt`; then
-install Wenuray itself with `pip install -e .` (from a clone) or `pip install wenuray`.
-
-### Option 4: From Source
-
-```bash
-git clone https://github.com/miguelcarcamov/wenuray
-cd wenuray
-pip install .
-```
-
-### Option 5: Development Installation
-
-For development work with editable installation:
+Three rounds: a phase solution over the whole scan, combining spectral windows for S/N; a shorter
+one, now that the model is better; and finally amplitudes and phases, cleaned deeper. Check it,
+then run it:
 
 ```bash
-git clone https://github.com/miguelcarcamov/wenuray
-cd wenuray
-pip install -e .
+wenuray validate recipe.toml    # builds the run and checks it, without touching the data
+wenuray run recipe.toml         # images, solves, applies and decides, round by round
 ```
 
-### Option 6: Docker Container
+`wenuray init > recipe.toml` writes a generic recipe to start from, and
+`wenuray run recipe.toml --ms other.ms` runs the same procedure on another dataset.
 
-Pull the pre-built Docker image:
+### The same run in Python
 
-```bash
-docker pull ghcr.io/miguelcarcamov/wenuray:latest
-```
-
-The image has Python 3.12, Wenuray with its pinned dependencies, and CASA's measures data and
-observatory table in `/opt/casa/data`, readable by any user (also under Apptainer/Singularity). To stay small it has
-no CUDA, and it skips the rest of casarundata (antenna responses and simulator files, used by
-e.g. the `awproject` gridder); mount a full copy at `/opt/casa/data` if you need it:
-
-```bash
-docker run --rm -v "$PWD":/work -w /work ghcr.io/miguelcarcamov/wenuray:latest python main_ALMA.py target.ms out
-```
-
-CASA needs a writable home directory. Apptainer/Singularity provides yours; with `docker run -u`,
-also pass `-e HOME=/tmp`.
-
-`wenuray.utils.reproject()` needs the optional `reproject` package: `pip install "wenuray[reproject]"`.
-
-## Quick Start
-
-### Basic Usage Example
-
-Phase, then amplitude-phase self-calibration of an ALMA dataset. This is
-[`examples/alma/selfcal.py`](https://github.com/miguelcarcamov/wenuray/blob/development/examples/alma/selfcal.py); a test keeps the two identical.
+Each table in a recipe is a constructor and its keys are that class's arguments, so a recipe and a
+script build equal objects. This is
+[`examples/alma/selfcal.py`](https://github.com/miguelcarcamov/wenuray/blob/development/examples/alma/selfcal.py);
+a test keeps the two identical.
 
 ```python
 """
@@ -190,210 +191,59 @@ if __name__ == '__main__':
     split(vis=result.ms, outputvis=args.output + "/selfcal.ms", datacolumn="corrected")
 ```
 
-Run the script:
+`Selfcal.from_toml("recipe.toml")` gives you the same `Selfcal` from the recipe, to inspect,
+change or run; `selfcal.to_toml(...)` writes it back.
 
-```bash
-python examples/alma/selfcal.py target.ms target_selfcal
-```
+## What you get
 
-### The same run as a TOML recipe
+- **A decision for every round.** By default a round is kept only if the peak S/N of the image
+  rises, every solution interval keeps enough antennas, and amplitude rounds don't lose model
+  flux: PSNR alone can rise while the model goes wrong. A rejected round is rolled back and the
+  run stops. You can combine your own acceptance rules with `AllOf`/`AnyOf`.
+- **Checks before any I/O.** An invalid schedule raises `ScheduleError` while the run is being
+  built. Before each `gaincal`, Wenuray predicts the solution's S/N from the data and tells you the
+  shortest solint that would reach `minsnr`.
+- **Bookkeeping you don't have to do.** Every accepted table stays applied in later solves, each
+  with its own `spwmap` and `interp`, and one `Selection` is used by the solve, the apply and the
+  imager.
+- **Reproducibility.** Each output directory holds the resolved `recipe.toml`, with every default
+  written out, and a `selfcal.toml` with each round's metrics, the accepted tables and the
+  provenance: a fingerprint of the input measurement set and the versions of Python, CASA,
+  Wenuray and the imager.
+- **Any imager.** CASA tclean, [Pyralysis](https://gitlab.com/clirai/pyralysis) (optimization-based
+  reconstruction), or your own: subclass `Imager` or wrap a function. Each one images
+  `CORRECTED_DATA` and writes `MODEL_DATA`, and Wenuray checks that it does.
+- **Any array.** The defaults come from theory and from the data, not from an instrument: there are
+  examples for ALMA, the VLA and e-MERLIN.
 
-A recipe is the same objects written as TOML: each table is a constructor and its keys are that
-class's arguments, so a recipe and a script build equal objects and raise the same errors. The
-imager, the steps, the acceptance policies and the flagging name their class with `type`.
+## Learn more
 
-```toml
-ms = "target.ms"           # paths are relative to the recipe
-output = "target_selfcal"
+- [How a run works](https://github.com/miguelcarcamov/wenuray/blob/development/docs/guide.md):
+  preparing the data, schedules, acceptance, recipes and presets, resuming, and an API overview.
+- [Imagers](https://github.com/miguelcarcamov/wenuray/blob/development/docs/imagers.md): the
+  imager contract, the Nyquist-cell check, tclean, Pyralysis and writing your own.
+- [Examples](https://github.com/miguelcarcamov/wenuray/tree/development/examples): ALMA, VLA and
+  e-MERLIN, each as a recipe and the script that builds the same run.
+- [Migrating from snow](https://github.com/miguelcarcamov/wenuray/blob/development/docs/migration.md):
+  code written for snow, the name before Wenuray 1.0, raises an error that shows the new call.
+- [API reference](https://wenuray.readthedocs.io/) on Read the Docs.
 
-[solve]
-refant = "DA51"
-minblperant = 6
+## About the name
 
-[imager]
-type = "tclean"
-niter = 100
-threshold = "0.1mJy"
-deconvolver = "hogbom"
-usemask = "auto-multithresh"
-geometry = { imsize = 1024, cell = "0.005arcsec" }
-weighting = { weighting = "briggs", robust = 0.5 }
+*Wenuray* (also written *Huenuray*) is a Mapuche woman's name. In Mapudungun it means **"flower of
+the sky"**: *wenu*, the sky, and *rayen*, flower. The radio sky is what Wenuray brings into focus,
+and its roots are in Chile, home of many of the world's radio telescopes.
 
-[[steps]]
-type = "phase"             # Phasecal; "amp" is Ampcal, "ampphase" AmpPhasecal
-solint = "inf"
-solve = { combine = "spw" }
+Wenuray is dedicated to the women of radio astronomy. Each major release carries one of their
+names, beginning with **v1.0 "Payne-Scott"**, after Ruby Payne-Scott (1912–1981), the first woman
+radio astronomer and a pioneer of radio interferometry.
 
-[[steps]]
-type = "phase"
-solint = "600s"
-solve = { combine = "spw" }
+Wenuray was called *snow* (ca**S**a pytho**N** self-calibrati**O**n frame**W**ork) before
+version 1.0.
 
-[[steps]]
-type = "ampphase"
-solint = "inf"
-imaging = { threshold = "0.025mJy" }
-```
+## Citing Wenuray
 
-```python
-selfcal = Selfcal.from_toml("recipe.toml")  # an ordinary Selfcal: inspect it, change it, run it
-selfcal.to_toml("copy.toml")                # and back; values equal to the defaults are left out
-```
-
-Or from the command line:
-
-```bash
-wenuray init > recipe.toml                 # a generic recipe to start from
-wenuray validate recipe.toml               # builds the run and checks it, without touching the data
-wenuray show --defaults recipe.toml        # the resolved recipe: presets laid in, every value shown
-wenuray run recipe.toml --plots            # runs it, plotting the gain solutions
-wenuray run recipe.toml --ms other.ms      # the same procedure on another dataset
-```
-
-Errors are the same as from Python, e.g. a misspelt `refant` or an amplitude step before any
-phase step, and `wenuray` exits with status 1.
-
-### Reproducing a run
-
-Every run records how to repeat it in its output directory:
-
-- **`recipe.toml`**: the run as a resolved recipe, written before anything runs, with presets laid
-  in and every default written out, so later changes to Wenuray's defaults can't change it.
-- **`selfcal.toml`**: the rounds and accepted tables, plus a `[provenance]` table with the start
-  time, a fingerprint of the input measurement set (a hash of its metadata and of sampled `DATA`
-  and `FLAG` rows) and the versions of Python, Wenuray, CASA and the imager's packages.
-
-```bash
-wenuray run target_selfcal/recipe.toml --ms fresh_copy.ms --output rerun
-```
-
-reruns it on a fresh copy of the input. A run Wenuray can't write as a recipe, e.g. one with a
-`Check(name, lambda ...)` policy, still runs; it logs a warning and records no recipe.
-
-`preset = "group.toml"` lays a recipe over another TOML file, e.g. the solve options and imager
-settings your group shares: tables merge key by key and the recipe wins. Wenuray ships no presets,
-since its defaults come from theory or the data rather than from an instrument. A class of your
-own, e.g. an acceptance policy, is named as `type = "package.module:Class"`. Policies built with
-`Check(name, function)` can't be written to a recipe; make them a class.
-
-How a run is described:
-
-- **One `Selfcal`, a list of steps.** Each step is one round: `Phasecal`, `Ampcal` or
-  `AmpPhasecal` with its solution interval. A step can override the run's solve options
-  (`solve={"minsnr": 5.0}`), the imager's options (`imaging={"nsigma": 2.0}`) or the acceptance
-  policy (`acceptance=...`), and can flag residual outliers before imaging
-  (`flagging=ResidualFlagging("rflag")`, off by default).
-- **Invalid schedules fail before any I/O.** An amplitude step needs a phase solution before it,
-  in the schedule or in `initial_stack`; otherwise `Selfcal(...)` raises `ScheduleError`.
-- **Every accepted table stays applied.** Each solve pre-applies all accepted tables, each with
-  its own `spwmap` (derived from `combine`) and `interp`.
-- **A round is kept only if it improves the image.** By default the PSNR must rise and every
-  solution interval must keep enough antennas (3 for phases, 4 for amplitudes), and amplitude
-  rounds must not lose model flux. A rejected round is rolled back and stops the run.
-- **Each solve is checked first.** Before `gaincal`, Wenuray predicts a solution's S/N for the
-  step's solint and combine from the data: the median model amplitude over the noise of one
-  visibility, times √(N_ant − 1) · √(n_int · n_chan · n_pol). It warns when the prediction is
-  below `minsnr`, giving the shortest solint that would reach it, and records it as
-  `predicted_snr`.
-- **Continue later** with `Selfcal.resume(result_or_output_directory, imager, more_steps)`, or
-  start from tables of your own with `initial_stack=CalStack([CalTable("pcal", "p")])`.
-- **`result.final`** is the last accepted round; every round's metrics, decision and reasons
-  are in `result.rounds` and in `<output>/selfcal.toml`.
-
-What the input must look like:
-
-- **Calibrated data in `DATA`.** `gaincal` solves against `DATA`, while the imager images
-  `CORRECTED_DATA`. Split the calibrated target first
-  (`split(vis=..., outputvis=..., datacolumn="corrected")`). A run resets `CORRECTED_DATA` to
-  `DATA` (plus `initial_stack`) and warns if it held something else.
-- **One selection.** `Selection(field=..., spw=..., uvrange=...)` is used by the solve, the
-  apply and the imager.
-- **`applymode`.** The default `ApplyOptions(applymode="calflag")` flags data whose solutions fail
-  `minsnr`. `"calonly"` leaves those data uncalibrated but unflagged.
-
-More examples, for the VLA and e-MERLIN too, are in [`examples/`](https://github.com/miguelcarcamov/wenuray/tree/development/examples), each as a recipe and
-the script that builds the same run. Code written for snow, the name before
-Wenuray 1.0, raises an error that shows the new call; see the [migration guide](https://github.com/miguelcarcamov/wenuray/blob/development/docs/migration.md).
-
-## API Overview
-
-### Self-calibration (`wenuray.selfcalibration`)
-
-- **`Selfcal`**: the self-calibration loop; `run()` returns a `SelfcalResult`, and `resume()`
-  continues one.
-- **`Phasecal`, `Ampcal`, `AmpPhasecal`**: calibration steps.
-- **Acceptance policies**: `PSNRImproves`, `EnoughAntennas`, `FluxNotLost`, `BeamStable`,
-  `FlaggedFractionBelow`, `Check(name, predicate)` for your own, combined with `AllOf`/`AnyOf`.
-- **Observers**: `LoggingObserver` (the default) and `GainPlotObserver`, passed to `run()`.
-
-### Configuration (`wenuray.config`)
-
-Frozen objects with CASA's parameter names: `Selection`, `SolveOptions`, `ApplyOptions`,
-`ImageGeometry` and `Weighting` (natural by default).
-
-### Imaging (`wenuray.imaging`)
-
-An imager images `CORRECTED_DATA` and writes its model to `MODEL_DATA`; `Imager.image()` enforces
-both and raises `ImagerContractError` otherwise. It also raises `ValueError`, before imaging, when
-the cell is coarser than the Nyquist cell of the selected data: the image grid can't hold the
-longest baselines, so the model written for them would mislead the next solve. The message gives
-the largest cell that works, and the `Selection(uvrange=...)` that leaves those baselines out of
-the solve, the apply and the image alike.
-
-- **`Tclean(geometry, weighting, **tclean_options)`**: CASA tclean, with tclean's own parameter
-  names.
-- **`Pyralysis(geometry, weighting, terms=[...], optimizer=..., **pyralysis_options)`**:
-  optimization-based reconstruction with [Pyralysis](https://gitlab.com/clirai/pyralysis), with
-  its own names for terms (`"chi_squared"`, `"l1norm:1e-3"`), the optimizer (`"lbfgsb"`, `"fista"`)
-  and options (`max_iter`, `mask_mode`, ...). Each reconstruction runs in a separate process,
-  since Pyralysis's casacore and CASA's can't share one. **Give it a mask** (`mask_mode="file"`,
-  `mask_path=...`): a model free in every pixel can absorb the gain errors self-calibration
-  should solve for. Wenuray needs Pyralysis 3.2.1 or later, from PyPI; its
-  `ska-ost-array-config` dependency comes from SKA's index:
-
-  ```bash
-  pip install "wenuray[pyralysis]" \
-    --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
-  ```
-
-  A `Selection(uvrange=...)` works with Pyralysis in metres or km (e.g. `"<3090m"`, the form the
-  Nyquist check suggests); a range in wavelengths is refused, since it depends on each channel's
-  frequency.
-
-  Numba needs OpenMP's runtime (`libgomp1`, present on most systems and in Wenuray's images) or TBB
-  for Pyralysis's parallel kernels; Wenuray checks for it when the imager is created.
-
-- **Your own imager**: subclass `Imager` and implement `_reconstruct`, wrap a function in
-  `CallableImager`, or register it under the `wenuray.imagers` entry point to build it by name.
-  `wenuray.testing.ImagerContractSuite` checks that it follows the contract.
-
-## Project Structure
-
-```
-wenuray/
-├── src/wenuray/
-│   ├── config.py         # Selection, SolveOptions, ApplyOptions, ImageGeometry, Weighting
-│   ├── imaging/          # Imager contract, tclean backend, image statistics
-│   ├── selfcalibration/  # The Selfcal loop, steps, schedule rules, acceptance, observers
-│   ├── testing.py        # Simulated data and the imager contract suite
-│   └── utils/            # Utility functions
-├── examples/             # Recipe + script pairs (ALMA, VLA, e-MERLIN)
-├── docs/                 # Sphinx documentation and the migration guide
-├── requirements.txt      # Pinned dependencies tested in CI
-└── pyproject.toml        # Project metadata and build configuration
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the terms specified in the `LICENSE` file.
-
-## Citation
-
-If you use Wenuray in your research, please cite:
+If Wenuray helps your research, please cite it:
 
 ```bibtex
 @software{wenuray,
@@ -405,12 +255,15 @@ If you use Wenuray in your research, please cite:
 }
 ```
 
-## Support
+## Contributing and support
 
-- **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/miguelcarcamov/wenuray/issues)
-- **Documentation**: See the [CASA documentation](https://casadocs.readthedocs.io/) for CASA-specific questions
-- **Contact**: <miguel.carcamo@usach.cl>
+Bug reports, questions and pull requests are welcome on
+[GitHub](https://github.com/miguelcarcamov/wenuray/issues); see
+[`CONTRIBUTING.md`](https://github.com/miguelcarcamov/wenuray/blob/development/CONTRIBUTING.md).
+For CASA itself, the [CASA documentation](https://casadocs.readthedocs.io/) is the place to look.
+You can also write to <miguel.carcamo@usach.cl>.
 
-## Acknowledgments
-
-Wenuray is built on top of [CASA](https://casa.nrao.edu/) (Common Astronomy Software Applications), developed by the National Radio Astronomy Observatory (NRAO).
+Wenuray is free software under the
+[GNU General Public License v3 or later](https://github.com/miguelcarcamov/wenuray/blob/development/LICENSE).
+It is built on [CASA](https://casa.nrao.edu/) (Common Astronomy Software Applications), developed
+by the National Radio Astronomy Observatory (NRAO).

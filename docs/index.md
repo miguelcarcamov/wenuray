@@ -5,6 +5,9 @@
 :hidden:
 :caption: Guides
 
+installation
+guide
+imagers
 examples
 migration
 ```
