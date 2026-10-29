@@ -36,11 +36,27 @@ Self-calibration uses the target itself. An array of *N* antennas has *N(N−1)/
 3. **Apply** them and image again. If the image is better, keep the solution and go on with a
    shorter interval or with amplitudes; if not, roll it back.
 
-Doing this by hand is a script full of choices: solution intervals, reference antennas, which
-tables to pre-apply with which `spwmap`, when to stop. Wenuray turns those choices into a recipe
-it checks against self-calibration theory before it touches your data. For example, it refuses an
-amplitude round with no phase solution before it, and it warns when a solution interval is too
-short to reach your `minsnr`.
+## Why Wenuray?
+
+In practice, most astronomers write a new self-calibration script for each dataset: a new loop,
+the same choices made again (solution intervals, reference antennas, which tables to pre-apply
+with which `spwmap`, when to stop), and the same bookkeeping mistakes waiting to happen. These
+scripts are hard to share, hard to review and hard to reproduce. They are also usually tied to
+CASA, and so to `tclean`, the de facto standard imaging algorithm, even when another
+reconstruction method would suit the data better.
+
+Wenuray continues [snow](https://github.com/miguelcarcamov/wenuray/blob/development/docs/migration.md),
+and replaces those scripts with a framework:
+
+- **Describe the procedure, not the loop.** A self-calibration run is a short recipe. Wenuray owns
+  the loop and checks the recipe against self-calibration theory before it touches your data. For
+  example, it refuses an amplitude round with no phase solution before it, and it warns when a
+  solution interval is too short to reach your `minsnr`.
+- **Use any imager, not only tclean.** The imager is a plug-in: tclean,
+  [Pyralysis](https://gitlab.com/clirai/pyralysis) (optimization-based reconstruction) or your own
+  algorithm, all in the same loop.
+- **Extend it without forking it.** Acceptance rules, imagers and observers are classes you can
+  subclass and name in a recipe, so a new idea doesn't need a new script.
 
 ## Installation
 
