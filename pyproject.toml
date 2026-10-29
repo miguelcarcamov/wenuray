@@ -24,7 +24,8 @@ requires = [
 [project]
 # Project authors and maintainers
 authors = [
-  {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"}
+  {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"},
+  {name = "Simon Casassus"}
 ]
 # PyPI classifiers for better package discoverability
 classifiers = [
@@ -70,7 +71,8 @@ keywords = [
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 maintainers = [
-  {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"}
+  {name = "Miguel Cárcamo", email = "miguel.carcamo@usach.cl"},
+  {name = "Simon Casassus"}
 ]
 # The distribution, the import and the command are all wenuray
 name = "wenuray"
