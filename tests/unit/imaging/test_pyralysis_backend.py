@@ -103,6 +103,21 @@ class TestConstruction:
 
 class TestOptions:
 
+    @pytest.mark.parametrize(
+        "options, expected",
+        [
+            ({}, False), ({
+                "spectral_index": 0.0
+            }, False), ({
+                "spectral_index": 3.2
+            }, True), ({
+                "spectral_index": "alpha.fits"
+            }, True)
+        ],
+    )
+    def test_models_spectrum(self, options, expected):
+        assert imager(**options).models_spectrum is expected
+
     def test_config_objects_map_to_pyralysis_names(self):
         options = Pyralysis(
             ImageGeometry(imsize=(256, 128), cell="0.1arcsec", stokes="I"),

@@ -140,6 +140,12 @@ class Pyralysis(Imager):
                 stacklevel=2
             )
 
+    @property
+    def models_spectrum(self) -> bool:
+        # A spectral index, a number or the path of an alpha map; 0 is a flat spectrum
+        index = self.options.get("spectral_index")
+        return index is not None and not (isinstance(index, (int, float)) and index == 0)
+
     def with_overrides(self, **overrides) -> Pyralysis:
         """
         A copy with some options changed: geometry, weighting, terms and optimizer replace the

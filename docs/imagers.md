@@ -57,3 +57,7 @@ for Pyralysis's parallel kernels; Wenuray checks for it when the imager is creat
 Subclass `Imager` and implement `_reconstruct`, wrap a function in `CallableImager`, or register it
 under the `wenuray.imagers` entry point to build it by name (`type = "..."` in a recipe).
 `wenuray.testing.ImagerContractSuite` checks that it follows the contract.
+
+If your imager's model varies with frequency (a spectral index, Taylor terms, a cube), override the
+`models_spectrum` property to return `True`. Otherwise Wenuray assumes a flat spectrum and warns
+before amplitude steps that would absorb the source's spectrum.

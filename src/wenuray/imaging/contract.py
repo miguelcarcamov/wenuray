@@ -128,6 +128,15 @@ class Imager(ABC):
         visibilities to MODEL_DATA of request.ms
         """
 
+    @property
+    def models_spectrum(self) -> bool:
+        """
+        Whether the model varies with frequency (a spectral index, Taylor terms, a cube). Without
+        it, amplitudes solved per spectral window absorb the source's spectrum (#118). False by
+        default; an imager with a spectral model overrides it
+        """
+        return False
+
     def with_overrides(self, **overrides) -> Imager:
         """
         A copy of the imager with some options changed, e.g. for one self-calibration step.

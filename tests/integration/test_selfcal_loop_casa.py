@@ -141,6 +141,7 @@ def test_the_solution_snr_sample_reads_the_simulated_noise(tmp_path):
     assert (sample.nantennas, sample.interval, sample.channels, sample.parallel_hands) == \
         (8, 60.0, (1, ), 2)
     assert sample.span == pytest.approx(7200.0, abs=60.0)
+    assert sample.band == pytest.approx((5.0e9 - 64e6, 5.0e9 + 64e6))  # one 128 MHz channel
 
 
 def test_each_round_records_its_predicted_snr(accepted):

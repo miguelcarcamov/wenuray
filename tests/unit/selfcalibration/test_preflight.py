@@ -1,4 +1,5 @@
 """The pre-flight solution S/N prediction (#28), from a sample of the data."""
+import dataclasses
 import math
 
 import pytest
@@ -6,8 +7,10 @@ import pytest
 from wenuray.config import SolveOptions
 import numpy as np
 
-from wenuray.selfcalibration.preflight import VisibilitySample, _selected_channels, predict
-from wenuray.selfcalibration.steps import Ampcal, Phasecal
+from wenuray.selfcalibration.preflight import (
+    VisibilitySample, _selected_channels, absorbed_spectrum, predict
+)
+from wenuray.selfcalibration.steps import Ampcal, AmpPhasecal, Phasecal
 
 # 1 Jy over 0.1 Jy noise with 10 antennas: 10 * 3 = 30 for one integration, channel and hand
 SAMPLE = VisibilitySample(
@@ -18,7 +21,8 @@ SAMPLE = VisibilitySample(
     scan_length=600.0,
     span=3600.0,
     channels=(4, 4, 8),
-    parallel_hands=2
+    parallel_hands=2,
+    band=(336e9, 351e9),
 )
 ONE = 30.0
 
@@ -78,3 +82,35 @@ def test_a_spw_selection_counts_its_channel_ranges():
     two_spws = {"channel": np.array([[13, 0, 3, 1], [15, 0, 1, 1]]), "dd": np.array([13, 15])}
 
     assert _selected_channels(two_spws, DD_SPW, ALL_CHANNELS, DATA_DDIDS) == [4, 2]
+
+
+class TestAbsorbedSpectrum:
+    """Amplitudes per spw against a flat model take up the source's spectrum (#118)."""
+    OPTIONS = SolveOptions()
+
+    def check(self, step, snr=100.0, models_spectrum=False, sample=SAMPLE):
+        return absorbed_spectrum(sample, step, self.OPTIONS, snr, models_spectrum)
+
+    def test_amplitudes_per_spw_across_a_wide_band_warn(self):
+        # 4.4% band; solutions precise to 1%
+        message = self.check(AmpPhasecal("inf"))
+
+        assert "across a 4.4% band" in message and "precise to 1.0%" in message
+        assert self.check(Ampcal("inf"))
+
+    @pytest.mark.parametrize(
+        "step, snr, models_spectrum",
+        [
+            (Phasecal("inf"), 100.0, False),  # phases don't take up flux
+            (AmpPhasecal("inf", solve={"combine": "spw"}), 100.0, False),  # one gain for the band
+            (AmpPhasecal("inf"), 100.0, True),  # the model has the spectrum
+            (AmpPhasecal("inf"), 20.0, False),  # solutions too noisy (5%) to resolve alpha = 1
+        ],
+    )
+    def test_no_warning(self, step, snr, models_spectrum):
+        assert self.check(step, snr, models_spectrum) == ""
+
+    def test_one_spectral_window_keeps_the_spectrum(self):
+        one = dataclasses.replace(SAMPLE, channels=(8, ))
+
+        assert self.check(AmpPhasecal("inf"), sample=one) == ""

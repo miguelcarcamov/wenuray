@@ -55,6 +55,9 @@ class VisibilitySample:
         Channels of each selected spectral window
     parallel_hands :
         Parallel-hand correlations (RR and LL, or XX and YY)
+    band :
+        Lowest and highest frequency of the selected spectral windows, channel edges included, in
+        Hz
     """
     signal: float
     noise: float
@@ -64,6 +67,12 @@ class VisibilitySample:
     span: float
     channels: Tuple[int, ...]
     parallel_hands: int
+    band: Tuple[float, float]
+
+    @property
+    def fractional_bandwidth(self) -> float:
+        low, high = self.band
+        return 2 * (high - low) / (high + low)
 
 
 @dataclass(frozen=True)
@@ -121,6 +130,36 @@ def predict(sample: VisibilitySample, step: CalibrationStep, options: SolveOptio
     return SolutionSNR(prediction, options.minsnr, advice)
 
 
+def absorbed_spectrum(
+    sample: VisibilitySample, step: CalibrationStep, options: SolveOptions, snr: float,
+    models_spectrum: bool
+) -> str:
+    """
+    Why the step's amplitude gains would absorb the source's spectrum, or "" if they won't (#118).
+
+    Solved per spectral window against a model without a spectrum, each window's amplitude gain
+    takes up the source's flux at that window's frequency: the residual drops, but the calibrated
+    data lose their spectral index. A spectral index alpha changes the amplitude by about
+    alpha * (fractional bandwidth) across the band, and a solution with signal-to-noise ratio
+    ``snr`` measures amplitudes to about 1 / snr; the warning is given when the gains would resolve
+    the spectrum of a source with alpha = 1. One window, or windows combined, keep the spectrum.
+    """
+    options = step.solve_options(options)
+    combine = {axis.strip() for axis in options.combine.split(",")}
+    if not step.solves_amplitude or "spw" in combine or len(sample.channels) < 2:
+        return ""
+    if models_spectrum or sample.fractional_bandwidth <= 1 / snr:
+        return ""
+    return (
+        "amplitudes are solved per spectral window across a {0:.1%} band against a model without "
+        "a spectrum, with solutions precise to {1:.1%}: the gains can absorb the source's spectral "
+        "index and bias the calibrated data's. Give the imager a spectral model (e.g. tclean's "
+        "deconvolver='mtmfs', or Pyralysis's spectral_index), or combine='spw'".format(
+            sample.fractional_bandwidth, 1 / snr
+        )
+    )
+
+
 def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
     """
     Reads what the estimate needs from the selected data (field and spectral windows; uvrange
@@ -161,6 +200,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         dd_spw = dd_table.getcol("SPECTRAL_WINDOW_ID")
     with open_table(os.path.join(ms, "SPECTRAL_WINDOW")) as spw_table:
         all_channels = spw_table.getcol("NUM_CHAN")
+        edges = [_channel_edges(spw_table, spw) for spw in _selected_spws(indices, dd_spw, ddids)]
     channels = _selected_channels(indices, dd_spw, all_channels, ddids)
 
     model = np.concatenate([block["model"] for block in blocks])
@@ -185,6 +225,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         span=float(times.max() - times.min() + interval),
         channels=tuple(int(n) for n in channels),
         parallel_hands=blocks[0]["parallel_hands"],
+        band=(min(low for low, _ in edges), max(high for _, high in edges)),
     )
 
 
@@ -256,6 +297,21 @@ def _selected_channels(
         for spw, start, end, step in ranges:
             counts[spw] = counts.get(spw, 0) + len(range(start, end + 1, max(step, 1)))
         return [counts[spw] for spw in sorted(counts)]
+    return [int(all_channels[spw]) for spw in _selected_spws(indices, dd_spw, data_ddids)]
+
+
+def _selected_spws(indices: dict, dd_spw: np.ndarray, data_ddids: np.ndarray) -> list:
+    """
+    The selected spectral windows; for an empty selection, those that hold data (#115)
+    """
     ddids = indices["dd"] if len(indices["dd"]) else data_ddids
-    spws = sorted({int(dd_spw[dd]) for dd in ddids})
-    return [int(all_channels[spw]) for spw in spws]
+    return sorted({int(dd_spw[dd]) for dd in ddids})
+
+
+def _channel_edges(spw_table, spw: int) -> Tuple[float, float]:
+    """
+    The lowest and highest frequency a spectral window covers, channel widths included
+    """
+    frequencies = np.asarray(spw_table.getcell("CHAN_FREQ", spw))
+    half_widths = np.abs(np.asarray(spw_table.getcell("CHAN_WIDTH", spw))) / 2
+    return float(np.min(frequencies - half_widths)), float(np.max(frequencies + half_widths))

@@ -270,7 +270,7 @@ class Selfcal:
         for index, step in enumerate(self.steps, start=1):
             name = "round{0}".format(index)
             imager = self.imager.with_overrides(**step.imaging)
-            predicted = self._predict_snr(step)
+            predicted = self._predict_snr(step, accepted_imager)
             table = self._solve(step, stack, name)
             if table is None:
                 # Nothing was applied or imaged, so there is nothing to restore
@@ -369,10 +369,12 @@ class Selfcal:
             ImagingRequest(self.ms, os.path.join(self.output, name), self.selection)
         )
 
-    def _predict_snr(self, step: CalibrationStep) -> Optional[float]:
+    def _predict_snr(self, step: CalibrationStep, model_imager: Imager) -> Optional[float]:
         """
         The step's solution S/N predicted from the data, against the accepted model in
-        MODEL_DATA; warns when it is below minsnr. None if the data can't support an estimate
+        MODEL_DATA, which model_imager made; warns when it is below minsnr, or when amplitude
+        gains would absorb the source's spectrum (#118). None if the data can't support an
+        estimate
         """
         sample = preflight.read_sample(self.ms, self.selection)
         if sample is None:
@@ -385,6 +387,11 @@ class Selfcal:
                 "solutions; %s", _describe(step), prediction.snr, prediction.minsnr,
                 prediction.advice
             )
+        absorbed = preflight.absorbed_spectrum(
+            sample, step, self.solve, prediction.snr, model_imager.models_spectrum
+        )
+        if absorbed:
+            logger.warning("%s: %s", _describe(step), absorbed)
         return prediction.snr
 
     def _solve(self, step: CalibrationStep, stack: CalStack, name: str) -> Optional[CalTable]:
