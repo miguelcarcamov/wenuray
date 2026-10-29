@@ -144,6 +144,20 @@ class TestReconstruct:
         assert call.cwd == str(tmp_path)  # scratch files stay out of the working directory
         assert (result.restored, result.model) == (name + ".image.fits", name + ".model.fits")
 
+    def test_file_options_are_found_from_the_callers_directory(self, worker, monkeypatch, tmp_path):
+        # The worker runs in the output directory, so a relative mask path must not reach it
+        monkeypatch.setattr(backend, "_taql", lambda ms, selection: "")
+        monkeypatch.chdir(tmp_path)
+        absolute = str(tmp_path / "model.fits")
+
+        imager(mask_path="masks/disk.fits", initial_model=absolute)._reconstruct(
+            ImagingRequest("target.ms", str(tmp_path / "output" / "round1"))
+        )
+
+        options = worker.requests[-1].request["options"]
+        assert options["mask_path"] == str(tmp_path / "masks" / "disk.fits")
+        assert options["initial_model"] == absolute
+
     def test_failures_raise_with_the_workers_message(self, worker, monkeypatch, tmp_path):
         monkeypatch.setattr(backend, "_taql", lambda ms, selection: "")
         built = imager()

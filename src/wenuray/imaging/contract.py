@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, packages_distributions, version
 from types import MappingProxyType
-from typing import Callable, Mapping, Optional
+from typing import Callable, ClassVar, Mapping, Optional, Tuple
 
 import numpy as np
 from casatasks import delmod
@@ -110,6 +110,8 @@ class Imager(ABC):
     """
     # The image grid, checked against the data's Nyquist cell; None if the imager chooses its own
     geometry: Optional[ImageGeometry] = None
+    # Options that name files, e.g. a mask: a recipe resolves them against its own directory
+    file_options: ClassVar[Tuple[str, ...]] = ()
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

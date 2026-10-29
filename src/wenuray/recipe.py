@@ -34,10 +34,11 @@ type: a built-in name (see FAMILIES), an imager registered under the "wenuray.im
 "package.module:Class" for a class of your own.
 
 preset = "setup.toml" lays the recipe over another TOML file, e.g. the solve options and imager
-settings a group shares; tables merge key by key and the recipe wins. Wenuray's own paths in a recipe
-(ms, output, preset, the initial_stack tables) are relative to the recipe's directory; the
-imager's options are passed as written. Wenuray ships no presets: its defaults come from theory
-or the data, not from an instrument.
+settings a group shares; tables merge key by key and the recipe wins. Paths in a recipe are relative
+to the directory of the file that holds them: Wenuray's own (ms, output, preset, the initial_stack
+tables) and the imager options its class names in file_options (e.g. Pyralysis's mask_path), also
+in a step's imaging table. Other imager options are passed as written. Wenuray ships no presets:
+its defaults come from theory or the data, not from an instrument.
 
 Classes serialise their dataclass fields, leaving out the values that equal the defaults. A class
 whose constructor differs from its fields (e.g. one taking ``**options``) provides to_recipe() and the
@@ -306,6 +307,27 @@ def read(path: str, _seen: tuple = ()) -> dict:
     for table in recipe.get("initial_stack", {}).get("tables", []):
         table["path"] = os.path.normpath(os.path.join(directory, table["path"]))
     preset = recipe.pop("preset", None)
-    if preset is not None:
-        recipe = merge(read(preset, _seen + (path, )), recipe)
-    return recipe
+    base = read(preset, _seen + (path, )) if preset is not None else {}
+    _resolve_imager_files(recipe, base, directory)
+    return merge(base, recipe)
+
+
+def _resolve_imager_files(recipe: dict, base: Mapping, directory: str) -> None:
+    """
+    Resolves the imager's file options in this file (its imager table and its steps' imaging
+    tables) against its directory. The imager's type may come from the preset underneath; an
+    unknown type is left for decode() to report.
+    """
+    imager = merge(base, recipe).get("imager")
+    name = imager.get("type") if isinstance(imager, Mapping) else None
+    try:
+        options = class_of("imager", name).file_options if isinstance(name, str) else ()
+    except RecipeError:
+        return
+    tables = [recipe.get("imager")]
+    if isinstance(recipe.get("steps"), list):
+        tables += [step.get("imaging") for step in recipe["steps"] if isinstance(step, Mapping)]
+    for table in filter(lambda table: isinstance(table, dict), tables):
+        for option in options:
+            if isinstance(table.get(option), str) and table[option]:
+                table[option] = os.path.normpath(os.path.join(directory, table[option]))
