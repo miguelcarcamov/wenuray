@@ -51,6 +51,13 @@
   than 10% (the median over baselines), or when a baseline stands out. The initial round records
   the median as `noise_over_sigma`. `statwt` or Pyralysis's `EmpiricalWeightEstimator` can
   re-estimate the weights (#124).
+- **What the gains say.** Each solved round records diagnostics of its gain table (`gains`): its
+  phase (and amplitude) corrections against the noise of the solutions, from the table's SNR
+  column. Each table is the increment over the accepted stack, so a ratio falling towards 1 means
+  the run is converging: the round corrected little beyond noise. It also names the antennas whose
+  phases scatter more than their distance from the array centre predicts (atmospheric phase grows
+  with baseline length), and, for gaintype `G`, compares X with Y: an X−Y phase ratio near 1 says
+  `T` would do. `RoundMetrics.gains` holds them for acceptance policies of your own.
 - **A round is kept only if it improves the image.** By default the PSNR must rise and every
   solution interval must keep enough antennas (3 for phases, 4 for amplitudes), and amplitude
   rounds must not lose model flux. A rejected round is rolled back and stops the run.
