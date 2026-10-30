@@ -49,6 +49,7 @@ from .acceptance import AcceptancePolicy, RoundMetrics
 from .flagging import NoFlagging
 from .caltable import CalStack, CalTable, derive_spwmap
 from .observers import LoggingObserver, SelfcalObserver
+from .diagnostics import gain_diagnostics
 from .result import RoundRecord, SelfcalResult
 from .schedule import ScheduleError, validate_schedule
 from .steps import CalibrationStep
@@ -301,7 +302,13 @@ class Selfcal:
             data_flagged = step.flagging.flag(self.ms, self.selection)
             result = self._image(imager, name)
             flagged, antennas = solution_summary(table.path)
-            current = RoundMetrics(result.statistics(), step, flagged, antennas)
+            current = RoundMetrics(
+                result.statistics(),
+                step,
+                flagged,
+                antennas,
+                gains=gain_diagnostics(table.path, step.solves_amplitude)
+            )
             decision = step.acceptance_policy(self.acceptance).decide(accepted, current)
             rounds.append(
                 self._record(
@@ -501,6 +508,7 @@ class Selfcal:
             data_flagged=data_flagged,
             predicted_snr=predicted_snr,
             rms_in_mask=statistics.rms_in_mask,
+            gains=metrics.gains,
             thermal_noise=thermal_noise,
         )
 

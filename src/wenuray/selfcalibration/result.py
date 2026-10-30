@@ -15,6 +15,7 @@ import tomli_w
 from ..config import Selection
 from .application import Application, apply_to
 from .caltable import CalStack
+from .diagnostics import GainDiagnostics
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,9 @@ class RoundRecord:
     noise_over_sigma :
         Initial image only: the median over baselines of the data's measured noise over the noise
         their SIGMA states (#129); near 1 when the weights are right
+    gains :
+        Diagnostics of the round's gain table (#126): its corrections against their noise, the
+        antennas that stand out and the two polarizations compared
     """
     index: int
     step: str
@@ -73,6 +77,7 @@ class RoundRecord:
     rms_in_mask: Optional[float] = None
     thermal_noise: Optional[float] = None
     noise_over_sigma: Optional[float] = None
+    gains: Optional[GainDiagnostics] = None
 
     def __post_init__(self):
         if self.beam is not None:
@@ -80,6 +85,8 @@ class RoundRecord:
         if self.data_flagged is not None:
             object.__setattr__(self, "data_flagged", tuple(self.data_flagged))
         object.__setattr__(self, "reasons", tuple(self.reasons))
+        if isinstance(self.gains, Mapping):
+            object.__setattr__(self, "gains", GainDiagnostics(**self.gains))
 
 
 @dataclass(frozen=True)
@@ -185,6 +192,11 @@ class SelfcalResult:
             for name in ("predicted_snr", "rms_in_mask", "thermal_noise", "noise_over_sigma"):
                 if getattr(record, name) is not None:
                     entry[name] = getattr(record, name)
+            if record.gains is not None:
+                entry["gains"] = {
+                    name: list(value) if isinstance(value, tuple) else value
+                    for name, value in dataclasses.asdict(record.gains).items() if value is not None
+                }
             rounds.append(entry)
         data = {
             "ms": relative(self.ms),

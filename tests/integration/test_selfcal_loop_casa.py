@@ -267,3 +267,63 @@ def test_a_run_with_an_auto_grid_records_it(tmp_path):
     cell = result.provenance["geometry"]["cell"]
     assert float(cell[:-len("arcsec")]) == pytest.approx(1.745 / 2.5, rel=0.01)
     assert result.rounds[1].accepted
+
+
+@pytest.mark.parametrize("gaintype, calmode", [("T", "p"), ("T", "ap"), ("G", "ap"), ("G", "p")])
+def test_gain_diagnostics_read_one_at_the_noise(tmp_path, gaintype, calmode):
+    """
+    Solutions against the true model of data without gain errors are pure noise: every ratio of
+    scatter to noise reads about 1, whatever the gaintype and calmode (#126). This pins how CASA's
+    SNR column relates to the noise of the solutions
+    """
+    from casatasks import clearcal, gaincal
+    from wenuray.selfcalibration.diagnostics import gain_diagnostics
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+    clearcal(vis=ms, addmodel=True)
+    tool = table()
+    tool.open(ms, nomodify=False)
+    try:
+        tool.putcol("MODEL_DATA", np.ones_like(tool.getcol("MODEL_DATA")))  # the 1 Jy source
+    finally:
+        tool.close()
+    tool.done()
+    caltable = str(tmp_path / "noise.cal")
+    gaincal(
+        vis=ms,
+        caltable=caltable,
+        solint="int",
+        refant="A0",
+        minblperant=3,
+        gaintype=gaintype,
+        calmode=calmode
+    )
+
+    diagnostics = gain_diagnostics(caltable, solves_amplitude="a" in calmode)
+
+    ratios = [diagnostics.phase_over_noise]
+    ratios += [diagnostics.amplitude_over_noise] if "a" in calmode else []
+    ratios += [diagnostics.xy_phase_over_noise] if gaintype == "G" else []
+    assert all(0.8 < ratio < 1.2 for ratio in ratios), ratios
+
+
+def test_gain_diagnostics_fall_as_the_run_converges(tmp_path):
+    """
+    The first round corrects the injected phase errors, far above the noise; the second, against
+    the improved model, corrects less (#126)
+    """
+    from wenuray.selfcalibration.loop import Selfcal
+    from wenuray.selfcalibration.steps import Phasecal
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"))
+
+    result = Selfcal(
+        ms,
+        IMAGER, [Phasecal("int"), Phasecal("int")],
+        solve=SolveOptions(refant="A0", minblperant=3)
+    ).run()
+
+    first, second = result.rounds[1].gains, result.rounds[2].gains
+    assert first.phase_over_noise > 3
+    assert second.phase_over_noise < first.phase_over_noise
+    assert first.amplitude_over_noise is None  # phase-only

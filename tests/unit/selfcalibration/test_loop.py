@@ -65,6 +65,7 @@ def casa(monkeypatch, tmp_path):
         solves=True,
         corrected_matches=True,
         sample=None,
+        gains=None,
     )
 
     def gaincal(**kwargs):
@@ -78,6 +79,7 @@ def casa(monkeypatch, tmp_path):
     monkeypatch.setattr(workspace, "clearcal", mocks.clearcal)
     monkeypatch.setattr(workspace, "flagmanager", mocks.flagmanager)
     monkeypatch.setattr(loop, "solution_summary", lambda table: (0.05, (8, 8, 8)))
+    monkeypatch.setattr(loop, "gain_diagnostics", lambda table, amplitude: mocks.gains)
     monkeypatch.setattr(loop.preflight, "read_sample", lambda ms, selection: mocks.sample)
     monkeypatch.setattr(loop, "get_spw_ids", lambda ms, spw: [0])
     monkeypatch.setattr(loop, "ms_fingerprint", lambda ms: "sha256:input")
@@ -669,3 +671,18 @@ def test_weights_that_misstate_the_noise_warn_and_are_recorded(casa, caplog):
     assert "1.41 times the noise their weights (SIGMA) state" in caplog.text
     assert result.rounds[0].noise_over_sigma == pytest.approx(1.41)
     assert result.rounds[1].noise_over_sigma is None
+
+
+def test_gain_diagnostics_are_recorded_for_each_solved_round(casa, caplog):
+    from wenuray.selfcalibration.diagnostics import GainDiagnostics
+    casa.gains = GainDiagnostics(12.0, None, ("DV15", ), None, 1.6)
+
+    with caplog.at_level(logging.INFO, logger="wenuray"):
+        result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run()
+
+    assert [record.gains for record in result.rounds] == [None, casa.gains]
+    assert "Round 1 solutions over noise: phase 12.0, X-Y phase 1.6; outlying antennas: DV15" \
+        in caplog.text
+    assert SelfcalResult.from_toml(
+        str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
+    ) == result
