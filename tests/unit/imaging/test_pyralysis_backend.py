@@ -297,3 +297,21 @@ class TestWorkerEnvironment:
         # The worker's numpy is its own environment's, not this one's
         assert versions["pyralysis_worker"] == {"pyralysis": "3.3.0", "numpy": "2.3.5"}
         assert worker.requests[-1].request == {"versions": True}
+
+
+class TestAvailability:
+    """Whether Pyralysis is there is asked of the worker's Python, not this one (#148)."""
+
+    @pytest.fixture(autouse=True)
+    def fresh(self):
+        backend._worker_versions.cache_clear()
+
+    def test_available_when_the_worker_reports_it(self, worker):
+        worker.reply = {"error": "", "versions": {"pyralysis": "3.3.0"}}
+
+        assert backend.pyralysis_available()
+
+    def test_unavailable_when_the_worker_lacks_it(self, worker):
+        worker.reply, worker.returncode = {"error": "ModuleNotFoundError: pyralysis"}, 1
+
+        assert not backend.pyralysis_available()

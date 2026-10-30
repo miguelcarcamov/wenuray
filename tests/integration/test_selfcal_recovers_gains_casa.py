@@ -7,7 +7,6 @@ to the source position: the first model sits where the corrupted image put the s
 shifted model is a phase gradient across the array, l u + m v, that the gains take on. The test
 fits that shift out, and checks that it is small.
 """
-import importlib.util
 
 import numpy as np
 import pytest
@@ -17,6 +16,7 @@ from wenuray.imaging.backends import Pyralysis, Tclean
 from wenuray.selfcalibration import Phasecal, Selfcal
 from wenuray.testing import injected_phases, simulate_point_source_ms
 from wenuray.utils.selfcal_utils import SPEED_OF_LIGHT, open_table
+from wenuray.imaging.backends.pyralysis import pyralysis_available
 
 GEOMETRY = ImageGeometry(imsize=128, cell="1arcsec")
 
@@ -51,9 +51,7 @@ IMAGERS = [
     pytest.param(
         pyralysis,
         id="pyralysis",
-        marks=pytest.mark.skipif(
-            importlib.util.find_spec("pyralysis") is None, reason="needs Pyralysis"
-        ),
+        marks=pytest.mark.skipif(not pyralysis_available(), reason="needs Pyralysis"),
     ),
 ]
 

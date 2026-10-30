@@ -249,6 +249,17 @@ def _worker_versions(interpreter: str) -> dict:
     return _run({"versions": True}).get("versions", {})
 
 
+def pyralysis_available() -> bool:
+    """
+    Whether the worker's Python (WENURAY_PYRALYSIS_PYTHON, or this one) has a Pyralysis Wenuray
+    can use: asked of the worker, since Pyralysis may live in another environment (#148)
+    """
+    try:
+        return "pyralysis" in _worker_versions(_interpreter())
+    except (ImportError, RuntimeError):
+        return False
+
+
 def _interpreter() -> str:
     return os.environ.get(PYTHON_SETTING) or sys.executable
 
