@@ -19,6 +19,7 @@ and python-casacore, which Pyralysis reads measurement sets with, crash in one p
 """
 from __future__ import annotations
 
+import dataclasses
 import functools
 import json
 import logging
@@ -130,7 +131,10 @@ class Pyralysis(Imager):
         object.__setattr__(self, "terms", terms)
         object.__setattr__(self, "optimizer", optimizer)
         object.__setattr__(self, "options", MappingProxyType(dict(pyralysis_options)))
-        _check(json.dumps(self._cli_options(), sort_keys=True))
+        # An "auto" grid is derived when the run starts (#67); the other options are checked now,
+        # with a stand-in grid
+        stand_in = dataclasses.replace(geometry, imsize=(2, 2), cell="1arcsec")
+        _check(json.dumps(self._cli_options(stand_in if geometry.auto else None), sort_keys=True))
         if self.options.get("mask_mode", "none") == "none":
             warnings.warn(
                 "Pyralysis without a mask: a model free in every pixel can absorb the gain errors "
@@ -177,15 +181,16 @@ class Pyralysis(Imager):
     def from_recipe(cls, table: Mapping) -> Pyralysis:
         return cls(**recipe.decode_configs(table, geometry=ImageGeometry, weighting=Weighting))
 
-    def _cli_options(self) -> dict:
+    def _cli_options(self, geometry: ImageGeometry = None) -> dict:
         """
-        The Pyralysis CLI options, by destination name
+        The Pyralysis CLI options, by destination name, with the imager's grid or another
         """
-        nx, ny = self.geometry.imsize
+        geometry = geometry or self.geometry
+        nx, ny = geometry.imsize
         options = {
             "imsize": nx if nx == ny else "{0},{1}".format(nx, ny),
-            "cellsize": self.geometry.cell,
-            "stokes": self.geometry.stokes,
+            "cellsize": geometry.cell,
+            "stokes": geometry.stokes,
             "weighting": WEIGHTINGS[self.weighting.weighting],
             "term": list(self.terms),
             "optimizer": self.optimizer,

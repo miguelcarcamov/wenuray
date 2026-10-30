@@ -34,6 +34,7 @@ def test_replace_rejects_unknown_names(config):
         ApplyOptions(targets=(ApplyTarget("line.ms", Selection(spw="4")), ApplyTarget("b.ms"))),
         ImageGeometry(imsize=(1024, 512), cell="0.05arcsec", phasecenter="J2000 10h00m +30d00m"),
         ImageGeometry(),
+        ImageGeometry(imsize="auto", cell="auto", oversampling=3.0, field_of_view=2.0),
         Weighting(weighting="briggs", robust=-0.5, uvtaper=("0.1arcsec", )),
     ]
 )
@@ -98,3 +99,16 @@ def test_apply_targets_are_built_from_tables():
 def test_invalid_apply_targets_raise(build, match):
     with pytest.raises((TypeError, ValueError), match=match):
         build()
+
+
+def test_an_auto_grid_is_derived_later():
+    assert ImageGeometry(imsize="auto", cell="auto").auto
+    assert ImageGeometry(imsize=256, cell="auto").auto
+    assert not ImageGeometry(imsize=256, cell="0.1arcsec").auto
+
+
+@pytest.mark.parametrize("name", ["oversampling", "field_of_view"])
+@pytest.mark.parametrize("value", [0, -1.0, True, "2"])
+def test_grid_factors_must_be_positive_numbers(name, value):
+    with pytest.raises(ValueError, match=name):
+        ImageGeometry(**{name: value})

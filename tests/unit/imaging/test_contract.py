@@ -263,3 +263,36 @@ class TestImagingResultStatistics:
         statistics = ImagingResult(path, path, path, str(tmp_path / "no.mask")).statistics()
 
         assert statistics.rms == pytest.approx(1e-3, rel=0.15)
+
+
+class TestAutoGrid:
+    """cell="auto" is the Nyquist cell over the oversampling (#67); 40 klambda: 2.578 arcsec."""
+
+    @pytest.fixture
+    def uv(self, ms, monkeypatch):
+        monkeypatch.setattr(
+            contract, "uv_extent", lambda *args:
+            (np.array([10.0, 40.0]) * 1e3 * SPEED_OF_LIGHT / 1e9, np.full(2, 1e9))
+        )
+
+    def test_the_cell_is_the_nyquist_cell_over_the_oversampling(self, ms, uv):
+        imager = GriddedImager(state=ms, geometry=ImageGeometry(imsize=64, cell="auto"))
+
+        assert imager.resolved(request()).geometry.cell == "1.03arcsec"  # 2.578 / 2.5, rounded down
+        assert GriddedImager(
+            state=ms, geometry=ImageGeometry(imsize=64, cell="auto", oversampling=4)
+        ).resolved(request()).geometry.cell == "0.644arcsec"
+
+    def test_image_uses_the_derived_grid(self, ms, uv):
+        imager = GriddedImager(state=ms, geometry=ImageGeometry(imsize=64, cell="auto"))
+
+        assert imager.image(request()) is RESULT
+
+    def test_a_set_grid_is_kept(self, ms):
+        imager = GriddedImager(state=ms)
+
+        assert imager.resolved(request()) is imager
+
+    @pytest.mark.parametrize("pixels, size", [(1, 2), (1831, 1920), (1000, 1000), (1001, 1024)])
+    def test_image_sizes_are_even_and_five_smooth(self, pixels, size):
+        assert contract._fft_size(pixels) == size

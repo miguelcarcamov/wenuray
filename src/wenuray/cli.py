@@ -44,8 +44,9 @@ gaintype = "T"                 # "T": one solution for both polarizations, "G": 
 type = "tclean"                # or "pyralysis", or "package.module:Class" for your own
 niter = 1000
 nsigma = 3.0
-# Your data's grid: the cell must be no coarser than the Nyquist cell of the selected data
-geometry = { imsize = 1024, cell = "0.1arcsec" }
+# The grid: "auto" derives the cell from the Nyquist cell of the selected data and the size from
+# the primary beam; set imsize and cell, e.g. 1024 and "0.1arcsec", to choose your own
+geometry = { imsize = "auto", cell = "auto" }
 weighting = { weighting = "natural" }
 
 [[steps]]                      # one round each, in order
