@@ -20,6 +20,7 @@ CallableImager, or by name through the "wenuray.imagers" entry point (wenuray.im
 from __future__ import annotations
 
 import dataclasses
+import logging
 import math
 import os
 from abc import ABC, abstractmethod
@@ -32,10 +33,15 @@ import numpy as np
 from casatasks import delmod
 from casatools import quanta
 
-from ..config import ImageGeometry, Selection
+from ..config import AUTO, ImageGeometry, Selection
 from ..utils.image_utils import read_image
-from ..utils.selfcal_utils import SPEED_OF_LIGHT, is_column_in_ms, model_column_problem, uv_extent
+from ..utils.selfcal_utils import (
+    SPEED_OF_LIGHT, channel_edges, get_spw_ids, is_column_in_ms, model_column_problem, open_table,
+    uv_extent
+)
 from .statistics import ImageStatistics
+
+logger = logging.getLogger(__name__)
 
 
 class ImagerContractError(RuntimeError):
@@ -163,6 +169,20 @@ class Imager(ABC):
                 pass
         return versions
 
+    def resolved(self, request: ImagingRequest) -> Imager:
+        """
+        The imager with an "auto" cell or image size derived from the request's data (#67), or
+        itself if its grid is set
+        """
+        if self.geometry is None or not self.geometry.auto:
+            return self
+        geometry = resolve_geometry(self.geometry, request.ms, request.selection)
+        logger.info(
+            "Image grid derived from %s: imsize %s, cell %s", request.ms, geometry.imsize,
+            geometry.cell
+        )
+        return self.with_overrides(geometry=geometry)
+
     def image(self, request: ImagingRequest) -> ImagingResult:
         """
         Runs the imager and enforces the self-calibration contract
@@ -180,13 +200,14 @@ class Imager(ABC):
                     request.ms, request.data_column
                 )
             )
-        if self.geometry is not None and self.geometry.cell:
-            problem = undersampling_problem(request, self.geometry.cell)
+        imager = self.resolved(request)
+        if imager.geometry is not None and imager.geometry.cell:
+            problem = undersampling_problem(request, imager.geometry.cell)
             if problem:
                 raise ValueError(problem)
         # A model left from an earlier round, real or virtual, can't pass the check below
         delmod(vis=request.ms, otf=True, scr=True)
-        result = self._reconstruct(request)
+        result = imager._reconstruct(request)
         problem = model_column_problem(request.ms, request.selection.field, request.selection.spw)
         if problem:
             raise ImagerContractError(
@@ -208,6 +229,59 @@ def _radians(cell: str) -> float:
 def _round_down(value: float, digits: int = 3) -> float:
     scale = 10**(digits - 1 - math.floor(math.log10(value)))
     return math.floor(value * scale) / scale
+
+
+def resolve_geometry(geometry: ImageGeometry, ms: str, selection: Selection) -> ImageGeometry:
+    """
+    The grid with an "auto" cell and image size derived from the selected data (#67)
+
+    - cell: the Nyquist cell, 1 / (2 ``max(|u|, |v|)``) at each row's highest frequency, divided by
+      geometry.oversampling, rounded down to three significant digits;
+    - imsize: geometry.field_of_view primary-beam FWHMs, 1.02 lambda / D at the lowest selected
+      frequency and with the smallest dish (the widest beam), in pixels of that cell, rounded up
+      to an even size with no prime factors above 5, which FFTs handle well.
+
+    Raises
+    ------
+    ValueError
+        If the selection has no unflagged rows, or the dishes have no diameter
+    """
+    cell = geometry.cell
+    if cell == AUTO:
+        metres, frequency = uv_extent(ms, selection.field, selection.spw, selection.uvrange)
+        if len(metres) == 0:
+            raise ValueError("cell=\"auto\": {0} has no unflagged data in the selection".format(ms))
+        nyquist = math.degrees(1 / (2 * float(np.max(metres * frequency / SPEED_OF_LIGHT)))) * 3600
+        cell = "{0:g}arcsec".format(_round_down(nyquist / geometry.oversampling))
+    imsize = geometry.imsize
+    if imsize == AUTO:
+        with open_table(os.path.join(ms, "SPECTRAL_WINDOW")) as spw_table:
+            lowest = min(channel_edges(spw_table, spw)[0] for spw in get_spw_ids(ms, selection.spw))
+        with open_table(os.path.join(ms, "ANTENNA")) as antenna_table:
+            dishes = np.asarray(antenna_table.getcol("DISH_DIAMETER"), dtype=float)
+        if not np.any(dishes > 0):
+            raise ValueError(
+                "imsize=\"auto\": the antennas of {0} have no dish diameter".format(ms)
+            )
+        fwhm = 1.02 * SPEED_OF_LIGHT / lowest / float(dishes[dishes > 0].min())
+        pixels = _fft_size(math.ceil(geometry.field_of_view * fwhm / _radians(cell)))
+        imsize = (pixels, pixels)
+    return dataclasses.replace(geometry, cell=cell, imsize=imsize)
+
+
+def _fft_size(pixels: int) -> int:
+    """
+    The smallest even size of at least pixels whose prime factors are 2, 3 and 5
+    """
+    size = max(2, pixels + pixels % 2)
+    while True:
+        rest = size
+        for prime in (2, 3, 5):
+            while rest % prime == 0:
+                rest //= prime
+        if rest == 1:
+            return size
+        size += 2
 
 
 def undersampling_problem(request: ImagingRequest, cell: str) -> str:

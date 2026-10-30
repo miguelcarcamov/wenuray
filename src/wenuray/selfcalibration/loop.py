@@ -258,11 +258,18 @@ class Selfcal:
             observer.on_start(self)
         os.makedirs(self.output, exist_ok=True)
         provenance = self._provenance()
+        # An "auto" grid is derived once, from the data, and kept for every round (#67)
+        base = self.imager.resolved(ImagingRequest(self.ms, self.output, self.selection))
+        if base is not self.imager:
+            provenance["geometry"] = {
+                "imsize": list(base.geometry.imsize),
+                "cell": base.geometry.cell
+            }
         workspace = MSWorkspace(self.ms, self.selection, self.apply)
         self._reset_corrected(workspace)
         stack = self.initial_stack
 
-        result = self._image(self.imager, "round0")
+        result = self._image(base, "round0")
         thermal, noise_over_sigma = self._check_data()
         accepted = RoundMetrics(result.statistics())
         rounds = [
@@ -274,11 +281,11 @@ class Selfcal:
         _notify(observers, "on_round", rounds[-1])
         workspace.snapshot("round0")
         snapshots = ["round0"]
-        accepted_imager, accepted_name = self.imager, "round0"
+        accepted_imager, accepted_name = base, "round0"
 
         for index, step in enumerate(self.steps, start=1):
             name = "round{0}".format(index)
-            imager = self.imager.with_overrides(**step.imaging)
+            imager = base.with_overrides(**step.imaging)
             predicted = self._predict_snr(step, accepted_imager)
             table = self._solve(step, stack, name)
             if table is None:

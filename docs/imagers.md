@@ -15,6 +15,14 @@ mislead the next solve. The message gives the largest cell that works, and the
 `Selection(uvrange=...)` that leaves those baselines out of the solve, the apply and the image
 alike.
 
+**The grid can come from the data.** `ImageGeometry(cell="auto", imsize="auto")` derives the cell
+from the Nyquist cell of the selected data, divided by `oversampling` (default 2.5, about 5 pixels
+across the beam), and the size from the primary beam: `field_of_view` FWHMs (default 2.5, out to
+the main lobe's first null), 1.02 λ/D at the lowest selected frequency with the smallest dish,
+rounded up to a size FFTs handle well. Both factors are yours to change, in Python or a recipe
+(`geometry = { cell = "auto", imsize = "auto", oversampling = 3 }`). A run derives the grid once,
+when it starts, logs it, and records it in `selfcal.toml`'s provenance.
+
 Imagers take two config objects, `ImageGeometry` (`imsize`, `cell`, ...) and `Weighting` (natural
 by default), and pass every other option to the backend with the backend's own parameter names.
 

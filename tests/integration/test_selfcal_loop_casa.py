@@ -229,3 +229,41 @@ def test_the_noise_over_sigma_measures_how_wrong_the_weights_are(tmp_path, sigma
     assert len(ratios) == 28  # every baseline of the 8 antennas
     assert np.median(ratios) == pytest.approx(expected, rel=0.05)
     assert bool(weight_anomalies(sample)) == bool(expected > 1.1)
+
+
+def test_an_auto_grid_is_derived_from_the_data(tmp_path):
+    """
+    The simulated data reach 59.1 klambda (a 1.745 arcsec Nyquist cell) with 25 m dishes at 4.936
+    to 5.064 GHz (#67)
+    """
+    from wenuray.config import ImageGeometry, Selection
+    from wenuray.imaging.contract import resolve_geometry
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+
+    grid = resolve_geometry(ImageGeometry(imsize="auto", cell="auto"), ms, Selection())
+
+    cell = float(grid.cell[:-len("arcsec")])
+    assert cell == pytest.approx(1.745 / 2.5, rel=0.01)
+    fwhm = np.degrees(1.02 * 299792458.0 / 4.936e9 / 25.0) * 3600
+    needed = 2.5 * fwhm / cell
+    assert grid.imsize[0] == grid.imsize[1]
+    assert needed <= grid.imsize[0] < 1.1 * needed
+
+
+def test_a_run_with_an_auto_grid_records_it(tmp_path):
+    from wenuray.config import ImageGeometry
+    from wenuray.selfcalibration.loop import Selfcal
+    from wenuray.selfcalibration.steps import Phasecal
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"))
+    # A small field keeps the test fast: a tenth of the primary beam
+    imager = Tclean(
+        ImageGeometry(imsize="auto", cell="auto", field_of_view=0.25), niter=200, nsigma=3.0
+    )
+
+    result = Selfcal(ms, imager, [Phasecal("inf")], solve=SolveOptions(refant="A0")).run()
+
+    cell = result.provenance["geometry"]["cell"]
+    assert float(cell[:-len("arcsec")]) == pytest.approx(1.745 / 2.5, rel=0.01)
+    assert result.rounds[1].accepted
