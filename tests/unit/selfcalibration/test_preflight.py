@@ -8,7 +8,8 @@ from wenuray.config import SolveOptions
 import numpy as np
 
 from wenuray.selfcalibration.preflight import (
-    VisibilitySample, _selected_channels, absorbed_spectrum, predict
+    VisibilitySample, _noise_over_sigma, _selected_channels, absorbed_spectrum, predict,
+    weight_anomalies
 )
 from wenuray.selfcalibration.steps import Ampcal, AmpPhasecal, Phasecal
 
@@ -130,3 +131,42 @@ class TestThermalNoise:
 
         assert sample.thermal_noise == pytest.approx(0.1 * math.sqrt(5.0e4) / 3.0e4)
         assert sample.thermal_noise > 0.1 / math.sqrt(2.0e4)
+
+
+class TestWeightAnomalies:
+    """The data's measured noise against the noise their weights state (#129)."""
+
+    @staticmethod
+    def sample(*ratios):
+        entries = tuple(
+            ("A{0}".format(i), "A{0}".format(i + 1), 0, r) for i, r in enumerate(ratios)
+        )
+        return dataclasses.replace(SAMPLE, noise_over_sigma=entries)
+
+    def test_differences_measure_the_noise_sigma_states(self):
+        # Visibilities with 0.1 Jy noise differ by sqrt(2) * 0.1 in each part
+        rng = np.random.default_rng(0)
+        delta = math.sqrt(2) * 0.1 * (rng.standard_normal(4000) + 1j * rng.standard_normal(4000))
+        per_baseline = {(0, 1, 0): [(delta, np.full(4000, 0.1))]}
+
+        ((first, second, spw,
+          ratio), ) = _noise_over_sigma(per_baseline, np.array(["A0", "A1"]), np.array([3]))
+
+        assert (first, second, spw) == ("A0", "A1", 3)
+        assert ratio == pytest.approx(1.0, rel=0.03)
+
+    def test_right_weights_raise_nothing(self):
+        assert weight_anomalies(self.sample(1.02, 0.97, 1.01, 0.99, 1.0)) == ""
+        assert weight_anomalies(SAMPLE) == ""  # nothing measured
+
+    def test_weights_that_understate_the_noise(self):
+        message = weight_anomalies(self.sample(1.40, 1.43, 1.41, 1.42, 1.39))
+
+        assert "1.41 times the noise" in message and "understate" in message
+        assert "statwt" in message
+
+    def test_a_baseline_that_stands_out_is_named(self):
+        message = weight_anomalies(self.sample(1.0, 1.01, 0.99, 1.0, 1.02, 0.98, 2.5))
+
+        assert "1 of 7 baselines" in message and "A6-A7 spw 0 (2.50)" in message
+        assert "times the noise" not in message  # the median is right

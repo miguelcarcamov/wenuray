@@ -46,6 +46,11 @@
   and `rms_in_mask` inside the source mask). A residual inside the mask below 0.9× thermal is
   warned about: the model and the gains are fitting noise there. Image noise is always the MAD
   standard deviation, since it is correlated by the beam and isn't Gaussian.
+- **The weights.** From the same differences, Wenuray compares each baseline and spectral window's
+  measured noise with the noise its `SIGMA` states, and warns when the weights misstate it by more
+  than 10% (the median over baselines), or when a baseline stands out. The initial round records
+  the median as `noise_over_sigma`. `statwt` or Pyralysis's `EmpiricalWeightEstimator` can
+  re-estimate the weights (#124).
 - **A round is kept only if it improves the image.** By default the PSNR must rise and every
   solution interval must keep enough antennas (3 for phases, 4 for amplitudes), and amplitude
   rounds must not lose model flux. A rejected round is rolled back and stops the run.

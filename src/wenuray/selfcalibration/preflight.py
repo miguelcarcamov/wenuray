@@ -30,6 +30,12 @@ BLOCKS = 8
 INTEGRATIONS_PER_BLOCK = 4
 # 1.4826 MAD is the standard deviation of a Gaussian
 MAD_TO_SIGMA = 1.4826
+# Weight checks (#129): differences a baseline needs for its noise; how far measured noise over
+# SIGMA may be from 1 (10% in noise is 20% in weight, and 10% in every noise-based number); and
+# the robust z-score of a baseline that stands out
+MIN_DIFFERENCES = 20
+WEIGHTS_TOLERANCE = 0.1
+OUTLIER_Z = 5.0
 
 
 @dataclass(frozen=True)
@@ -61,6 +67,10 @@ class VisibilitySample:
     weights :
         Sums of the data weights and of their squares over the selected, unflagged visibilities of
         the parallel hands (every channel counted), from the sample scaled to the whole selection
+    noise_over_sigma :
+        For each sampled baseline and spectral window, (antenna1, antenna2, spw, ratio): the
+        noise of its consecutive-integration differences over the noise its SIGMA column states
+        (#129). Near 1 when the weights are right
     """
     signal: float
     noise: float
@@ -72,6 +82,7 @@ class VisibilitySample:
     parallel_hands: int
     band: Tuple[float, float]
     weights: Tuple[float, float]
+    noise_over_sigma: Tuple[Tuple[str, str, int, float], ...] = ()
 
     @property
     def fractional_bandwidth(self) -> float:
@@ -223,7 +234,14 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
     weight_squares = sum(block["weights"][1] for block in blocks)
     sampled = sum(block["rows"] for block in blocks)
     model = np.concatenate([block["model"] for block in blocks])
-    differences = np.concatenate([_differences(block, interval) for block in blocks])
+    per_baseline = {}
+    for block in blocks:
+        for key, (delta, sigma) in _differences(block, interval).items():
+            per_baseline.setdefault(key, []).append((delta, sigma))
+    differences = np.concatenate(
+        [delta for pairs in per_baseline.values() for delta, _ in pairs]
+        or [np.zeros(0, dtype=complex)]
+    )
     antennas = np.unique(np.concatenate([block["antennas"] for block in blocks]))
     if model.size == 0 or differences.size < 10 or not np.any(model > 0):
         return None
@@ -246,6 +264,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         parallel_hands=blocks[0]["parallel_hands"],
         band=(min(low for low, _ in edges), max(high for _, high in edges)),
         weights=(weight_sum * nrows / sampled, weight_squares * nrows / sampled),
+        noise_over_sigma=_noise_over_sigma(per_baseline, _antenna_names(ms), dd_spw),
     )
 
 
@@ -266,6 +285,7 @@ def _read_block(selected, start: int, nrow: int) -> dict:
         nrow=nrow
     )
     flags = selected.getcol("FLAG", startrow=start, nrow=nrow)
+    sigma = selected.getcol("SIGMA", startrow=start, nrow=nrow)
     hands = sorted({0, model.shape[0] - 1})
     antenna1 = selected.getcol("ANTENNA1", startrow=start, nrow=nrow)
     antenna2 = selected.getcol("ANTENNA2", startrow=start, nrow=nrow)
@@ -278,6 +298,7 @@ def _read_block(selected, start: int, nrow: int) -> dict:
         "model": np.abs(model[hands])[good],
         "data": data[hands],
         "flags": flags[hands],
+        "sigma": sigma[hands],
         "baseline": antenna1 * 100000 + antenna2,
         "ddid": selected.getcol("DATA_DESC_ID", startrow=start, nrow=nrow),
         "time": selected.getcol("TIME", startrow=start, nrow=nrow),
@@ -291,11 +312,12 @@ def _read_block(selected, start: int, nrow: int) -> dict:
     }
 
 
-def _differences(block: dict, interval: float) -> np.ndarray:
+def _differences(block: dict, interval: float) -> dict:
     """
-    Differences of consecutive integrations of each baseline, correlation and channel
+    Differences of consecutive integrations of each baseline, correlation and channel, by
+    (antenna1, antenna2, data description), with the SIGMA of the visibilities differenced
     """
-    differences = []
+    differences = {}
     keys = block["baseline"] * 1000 + block["ddid"]
     for key in np.unique(keys):
         rows = np.flatnonzero(keys == key)
@@ -306,8 +328,73 @@ def _differences(block: dict, interval: float) -> np.ndarray:
             continue
         both = ~block["flags"][..., first] & ~block["flags"][..., second]
         delta = block["data"][..., second] - block["data"][..., first]
-        differences.append(delta[both])
-    return np.concatenate(differences) if differences else np.zeros(0, dtype=complex)
+        sigma = np.broadcast_to(block["sigma"][:, None, first], delta.shape)
+        baseline, ddid = divmod(int(key), 1000)
+        differences[(*divmod(baseline, 100000), ddid)] = (delta[both], sigma[both])
+    return differences
+
+
+def _noise_over_sigma(per_baseline: dict, names: np.ndarray, dd_spw: np.ndarray) -> tuple:
+    """
+    Each baseline and spectral window's measured noise over the noise its SIGMA states. A
+    difference of two visibilities has sqrt(2) times their noise in each of its real and
+    imaginary parts; the visibilities are independent, so a plain standard deviation is right
+    """
+    ratios = []
+    for (antenna1, antenna2, ddid), pairs in sorted(per_baseline.items()):
+        delta = np.concatenate([delta for delta, _ in pairs])
+        sigma = np.concatenate([sigma for _, sigma in pairs])
+        if delta.size < MIN_DIFFERENCES or not np.median(sigma) > 0:
+            continue
+        measured = np.std(np.concatenate([delta.real, delta.imag])) / math.sqrt(2)
+        ratios.append(
+            (
+                str(names[antenna1]), str(names[antenna2]), int(dd_spw[ddid]),
+                float(measured / np.median(sigma))
+            )
+        )
+    return tuple(ratios)
+
+
+def _antenna_names(ms: str) -> np.ndarray:
+    with open_table(os.path.join(ms, "ANTENNA")) as antenna_table:
+        return np.asarray(antenna_table.getcol("NAME"))
+
+
+def weight_anomalies(sample: VisibilitySample) -> str:
+    """
+    Why the data weights misstate the noise, or "" if they don't (#129): the median over baselines
+    of measured noise over SIGMA more than WEIGHTS_TOLERANCE from 1, and the baselines whose ratio
+    stands out (a robust z-score above OUTLIER_Z, and WEIGHTS_TOLERANCE from the median)
+    """
+    if not sample.noise_over_sigma:
+        return ""
+    ratios = np.array([ratio for *_, ratio in sample.noise_over_sigma])
+    median = float(np.median(ratios))
+    spread = MAD_TO_SIGMA * float(np.median(np.abs(ratios - median)))
+    outliers = [
+        "{0}-{1} spw {2} ({3:.2f})".format(*entry) for entry in sample.noise_over_sigma
+        if abs(entry[3] - median) > max(OUTLIER_Z * spread, WEIGHTS_TOLERANCE * median)
+    ]
+    problems = []
+    if abs(median - 1) > WEIGHTS_TOLERANCE:
+        problems.append(
+            "the data's noise is {0:.2f} times the noise their weights (SIGMA) state, on the "
+            "median of {1} baselines: the weights {2} it, which skews the solve, the predicted "
+            "S/N and imagers that use the weights".format(
+                median, len(ratios), "understate" if median > 1 else "overstate"
+            )
+        )
+    if outliers:
+        problems.append(
+            "{0} of {1} baselines' noise doesn't match their weights: {2}".format(
+                len(outliers), len(ratios),
+                ", ".join(outliers[:10]) + (", ..." if len(outliers) > 10 else "")
+            )
+        )
+    if problems:
+        problems.append("statwt, or Pyralysis's EmpiricalWeightEstimator, can re-estimate them")
+    return "; ".join(problems)
 
 
 def _selected_channels(

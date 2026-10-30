@@ -654,3 +654,18 @@ class TestApplyTargets:
         assert SelfcalResult.from_toml(
             str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
         ).applications == result.applications
+
+
+def test_weights_that_misstate_the_noise_warn_and_are_recorded(casa, caplog):
+    from wenuray.selfcalibration.preflight import VisibilitySample
+    ratios = tuple(("A{0}".format(i), "B", 0, 1.41) for i in range(6))
+    casa.sample = VisibilitySample(
+        1.0, 0.05, 8, 60.0, 7200.0, 7200.0, (1, ), 2, (5.0e9, 5.1e9), (2500.0, 2500.0), ratios
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run(observers=())
+
+    assert "1.41 times the noise their weights (SIGMA) state" in caplog.text
+    assert result.rounds[0].noise_over_sigma == pytest.approx(1.41)
+    assert result.rounds[1].noise_over_sigma is None

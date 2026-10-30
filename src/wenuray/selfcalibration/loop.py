@@ -26,9 +26,10 @@ from __future__ import annotations
 import logging
 import os
 import platform
+from statistics import median
 from datetime import datetime, timezone
 from importlib import metadata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, Tuple, Union
 
@@ -262,9 +263,14 @@ class Selfcal:
         stack = self.initial_stack
 
         result = self._image(self.imager, "round0")
-        thermal = self._thermal_noise()
+        thermal, noise_over_sigma = self._check_data()
         accepted = RoundMetrics(result.statistics())
-        rounds = [self._record(0, None, "", result, accepted, True, ("initial image", ), thermal)]
+        rounds = [
+            replace(
+                self._record(0, None, "", result, accepted, True, ("initial image", ), thermal),
+                noise_over_sigma=noise_over_sigma
+            )
+        ]
         _notify(observers, "on_round", rounds[-1])
         workspace.snapshot("round0")
         snapshots = ["round0"]
@@ -380,20 +386,25 @@ class Selfcal:
             ImagingRequest(self.ms, os.path.join(self.output, name), self.selection)
         )
 
-    def _thermal_noise(self) -> Optional[float]:
+    def _check_data(self) -> Tuple[Optional[float], Optional[float]]:
         """
-        The image's thermal noise from the data (#119), once per run after the initial image;
-        None if the data can't support an estimate
+        Once per run, after the initial image: the image's thermal noise from the data (#119), and
+        the median of measured noise over SIGMA, warning when the weights misstate the noise
+        (#129). None for what the data can't support
         """
         sample = preflight.read_sample(self.ms, self.selection)
         if sample is None:
             logger.debug("No thermal noise estimate for %s", self.ms)
-            return None
+            return None, None
         logger.info(
             "Thermal noise from the data: %.3g mJy/beam (natural weighting; a floor for others)",
             sample.thermal_noise * 1e3
         )
-        return sample.thermal_noise
+        anomalies = preflight.weight_anomalies(sample)
+        if anomalies:
+            logger.warning("%s: %s", self.ms, anomalies)
+        ratios = [ratio for *_, ratio in sample.noise_over_sigma]
+        return sample.thermal_noise, float(median(ratios)) if ratios else None
 
     def _predict_snr(self, step: CalibrationStep, model_imager: Imager) -> Optional[float]:
         """
