@@ -2,7 +2,7 @@
 # neither Wenuray nor CASA has to be installed.
 myst-parser>=5.1.0
 setuptools-scm>=8
-sphinx>=8
+sphinx>=9.0.4
 sphinx-autoapi>=3.8.1
 sphinx-book-theme>=1.4.0
 sphinx-copybutton>=0.5.2
