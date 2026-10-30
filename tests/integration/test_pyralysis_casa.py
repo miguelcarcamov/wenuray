@@ -3,7 +3,6 @@ The Pyralysis imager (#24) with real CASA and Pyralysis: the imager contract, an
 end to end. Skipped where Pyralysis isn't installed. Pyralysis is never imported here: it runs in
 its own process, since it can't share one with casatools.
 """
-import importlib.util
 import re
 import warnings
 
@@ -17,10 +16,9 @@ from wenuray.imaging.contract import ImagingRequest
 from wenuray.selfcalibration import Phasecal, Selfcal
 from wenuray.testing import ImagerContractSuite, simulate_point_source_ms
 from wenuray.utils.selfcal_utils import open_table
+from wenuray.imaging.backends.pyralysis import pyralysis_available
 
-pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("pyralysis") is None, reason="Pyralysis isn't installed"
-)
+pytestmark = pytest.mark.skipif(not pyralysis_available(), reason="Pyralysis isn't installed")
 
 # Nyquist sampling: the longest baselines (~59 klambda) need cells of 1.74 arcsec or less. With
 # coarser cells they fall outside the uv grid, which Pyralysis's fit doesn't represent
@@ -39,7 +37,7 @@ def pyralysis_imager(**options) -> Pyralysis:
 
 
 class TestPyralysisContract(ImagerContractSuite):
-    imager = pyralysis_imager() if importlib.util.find_spec("pyralysis") else None
+    imager = pyralysis_imager() if pyralysis_available() else None
 
 
 def test_options_are_checked_by_pyralysis():
@@ -111,11 +109,12 @@ def test_self_calibration_with_pyralysis(tmp_path):
 
 
 def test_the_installed_pyralysis_is_one_wenuray_supports():
-    from importlib.metadata import version
-
+    from wenuray.imaging.backends import pyralysis as backend
     from wenuray.imaging.backends._pyralysis_worker import MINIMUM_PYRALYSIS
 
-    found = tuple(int(part) for part in version("pyralysis").split(".")[:3])
+    # The worker's Pyralysis, which may live in another environment (#148)
+    version = backend._worker_versions(backend._interpreter())["pyralysis"]
+    found = tuple(int(part) for part in version.split(".")[:3])
     assert found >= MINIMUM_PYRALYSIS >= (3, 2, 1)
 
 
