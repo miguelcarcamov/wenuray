@@ -69,7 +69,7 @@ pre-commit install
 - CASA wheels exist only for specific Python versions; check `requires-python` in `pyproject.toml`.
 - CASA needs measures data (`casaconfig`) the first time `casatools` is imported. Without network access, provide a measures directory. The base image ships it in `/opt/casa/data`.
 - `requirements.txt` installs casatools from its `manylinux_2_28` wheel: the `manylinux_2_34` wheel fails to import outside RHEL-like systems (`OPENSSL_3.0.1 not found`).
-- The Docker images (`ghcr.io/miguelcarcamov/wenuray:base`, `:latest`) are optional and kept small: `python:3.12-slim`, the pinned dependencies, CASA measures data only, no CUDA (Pyralysis brings that in #24). Build locally with `docker build .`; `--build-arg MEASURES_SITE=<url>` picks another measures server.
+- The Docker images are optional and kept small (#148): `:base`/`:latest` (Pyralysis on CPU) and `:base-gpu`/`:gpu` (CUDA 12 for Pyralysis, from NVIDIA's pip wheels on the same `python:3.12-slim` base). Wenuray's pinned set is in `/opt/venv`; Pyralysis in its own `/opt/pyralysis` (`requirements-pyralysis.txt`, `-gpu.txt`; its pins conflict with ours), run through `WENURAY_PYRALYSIS_PYTHON`. CASA measures data only. Don't `strip` Pyralysis's wheels: auditwheel-patched libraries (NumPy's OpenBLAS, Numba's threading layers) break. Build locally with `docker build .` (`--build-arg PYRALYSIS=pyralysis-gpu` for the GPU variant); `--build-arg MEASURES_SITE=<url>` picks another measures server.
 - `reproject` is an optional extra (`wenuray[reproject]`), imported inside `wenuray.utils.reproject()` only.
 
 ## Tests and linting
