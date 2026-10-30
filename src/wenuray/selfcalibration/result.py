@@ -59,6 +59,8 @@ class RoundRecord:
     gains :
         Diagnostics of the round's gain table (#126): its corrections against their noise, the
         antennas that stand out and the two polarizations compared
+    findings :
+        What the advisories found in the round, or in the data for the initial one (#141)
     """
     index: int
     step: str
@@ -78,6 +80,7 @@ class RoundRecord:
     thermal_noise: Optional[float] = None
     noise_over_sigma: Optional[float] = None
     gains: Optional[GainDiagnostics] = None
+    findings: Tuple[str, ...] = ()
 
     def __post_init__(self):
         if self.beam is not None:
@@ -85,6 +88,7 @@ class RoundRecord:
         if self.data_flagged is not None:
             object.__setattr__(self, "data_flagged", tuple(self.data_flagged))
         object.__setattr__(self, "reasons", tuple(self.reasons))
+        object.__setattr__(self, "findings", tuple(self.findings))
         if isinstance(self.gains, Mapping):
             object.__setattr__(self, "gains", GainDiagnostics(**self.gains))
 
@@ -192,6 +196,8 @@ class SelfcalResult:
             for name in ("predicted_snr", "rms_in_mask", "thermal_noise", "noise_over_sigma"):
                 if getattr(record, name) is not None:
                     entry[name] = getattr(record, name)
+            if record.findings:
+                entry["findings"] = list(record.findings)
             if record.gains is not None:
                 entry["gains"] = {
                     name: list(value) if isinstance(value, tuple) else value

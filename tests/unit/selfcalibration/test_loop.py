@@ -686,3 +686,32 @@ def test_gain_diagnostics_are_recorded_for_each_solved_round(casa, caplog):
     assert SelfcalResult.from_toml(
         str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
     ) == result
+
+
+def test_findings_reach_the_observers_and_the_record(casa, caplog):
+    from wenuray.selfcalibration.observers import SelfcalObserver
+    from wenuray.selfcalibration.preflight import VisibilitySample
+
+    class Findings(SelfcalObserver):
+
+        def __init__(self):
+            self.found = []
+
+        def on_finding(self, finding):
+            self.found.append(finding.message)
+
+    # A predicted S/N below minsnr (#28)
+    casa.sample = VisibilitySample(
+        1.0, 2.0, 8, 60.0, 7200.0, 7200.0, (1, ), 2, (5.0e9, 5.1e9), (2500.0, 2500.0)
+    )
+    observer = Findings()
+
+    with caplog.at_level(logging.WARNING):
+        result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("int")]).run(observers=[observer])
+
+    (message, ) = observer.found
+    assert "predicted solution S/N 1.9 is below minsnr 3" in message
+    assert result.rounds[1].findings == (message, )  # recorded with its round
+    assert message in caplog.text  # and still logged without a LoggingObserver
+    assert SelfcalResult.from_toml(str(Path(casa.ms).with_suffix("")) +
+                                   "_selfcal/selfcal.toml").rounds[1].findings == (message, )
