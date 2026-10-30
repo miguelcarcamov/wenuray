@@ -69,6 +69,13 @@ jobs:
   build-latest-container:
     runs-on: ubuntu-latest
     needs: build
+    # The release image on CPU, and on :base-gpu for Pyralysis on CUDA (#148)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - {base: base, suffix: '', latest: latest}
+        - {base: base-gpu, suffix: -gpu, latest: gpu}
     steps:
     - name: Checkout Code
       uses: actions/checkout@v7
@@ -102,11 +109,13 @@ jobs:
       with:
         context: .
         file: ./Dockerfile.prod
+        build-args: BASE_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}:${{ matrix.base }}
         # Pull requests only check that the image builds; releases publish it under their tag.
-        # Only full releases move :latest, so a pre-release can't replace the image users pull.
+        # Only full releases move :latest (and :gpu), so a pre-release can't replace the image
+        # users pull.
         push: ${{ github.event_name == 'release' }}
         tags: |
-          ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.event_name == 'release' && github.event.release.tag_name || format('pr-{0}', github.event.number) }}
-          ${{ github.event_name == 'release' && !github.event.release.prerelease && format('{0}/{1}:latest', env.REGISTRY, github.repository) || '' }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+          ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.event_name == 'release' && github.event.release.tag_name || format('pr-{0}', github.event.number) }}${{ matrix.suffix }}
+          ${{ github.event_name == 'release' && !github.event.release.prerelease && format('{0}/{1}:{2}', env.REGISTRY, github.repository, matrix.latest) || '' }}
+        cache-from: type=gha,scope=${{ matrix.latest }}
+        cache-to: type=gha,mode=max,scope=${{ matrix.latest }}
