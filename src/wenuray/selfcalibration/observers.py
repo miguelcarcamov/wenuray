@@ -17,7 +17,7 @@ from .caltable import CalTable
 if TYPE_CHECKING:
     from .loop import Selfcal
     from .result import RoundRecord, SelfcalResult
-    from .steps import CalibrationStep
+    from .steps import CalibrationStep, Finding
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,11 @@ class SelfcalObserver:
     def on_round(self, record: RoundRecord) -> None:
         """
         After a round was imaged and judged (index 0 is the initial image)
+        """
+
+    def on_finding(self, finding: Finding) -> None:
+        """
+        When an advisory found something (#141); the loop logs it and records it with its round
         """
 
     def on_finished(self, result: SelfcalResult) -> None:

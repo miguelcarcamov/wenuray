@@ -45,6 +45,7 @@ from ..utils.selfcal_utils import (
     solution_summary
 )
 from . import preflight
+from .advisories import ADVISORIES, RoundContext, SolveContext, StartContext
 from .acceptance import AcceptancePolicy, RoundMetrics
 from .flagging import NoFlagging
 from .caltable import CalStack, CalTable, derive_spwmap
@@ -52,7 +53,7 @@ from .observers import LoggingObserver, SelfcalObserver
 from .diagnostics import gain_diagnostics
 from .result import RoundRecord, SelfcalResult
 from .schedule import ScheduleError, validate_schedule
-from .steps import CalibrationStep
+from .steps import CalibrationStep, Severity
 from .workspace import MSWorkspace
 
 logger = logging.getLogger(__name__)
@@ -342,11 +343,12 @@ class Selfcal:
         workspace = MSWorkspace(self.ms, self.selection, self.apply)
         self._reset_corrected(workspace)
         result = self._image(base, "round0")
-        thermal, noise_over_sigma = self._check_data()
+        thermal, noise_over_sigma, findings = self._check_data(observers)
         metrics = RoundMetrics(result.statistics())
         record = replace(
             self._record(0, None, "", result, metrics, True, ("initial image", ), thermal),
-            noise_over_sigma=noise_over_sigma
+            noise_over_sigma=noise_over_sigma,
+            findings=findings
         )
         state = _RunState(workspace, base, self.initial_stack, metrics, base, "round0", thermal)
         state.rounds.append(record)
@@ -372,11 +374,14 @@ class Selfcal:
         """
         name = "round{0}".format(index)
         imager = state.base.with_overrides(**step.imaging)
-        predicted = self._predict_snr(step, state.accepted_imager)
+        predicted, findings = self._predict_snr(step, state.accepted_imager, observers)
         table = self._solve(step, state.stack, name)
         if table is None:
             # Nothing was applied or imaged, so there is nothing to restore
-            record = self._failed_record(index, step, "gaincal found no solutions", predicted)
+            record = replace(
+                self._failed_record(index, step, "gaincal found no solutions", predicted),
+                findings=findings
+            )
             state.rounds.append(record)
             _notify(observers, "on_round", record)
             return record
@@ -398,8 +403,9 @@ class Selfcal:
             index, step, table.path, result, current, decision.accepted, decision.reasons,
             state.thermal, data_flagged, predicted
         )
+        findings += self._advise("after_round", RoundContext(record), observers)
+        record = replace(record, findings=findings)
         state.rounds.append(record)
-        _warn_if_below_thermal(record)
         _notify(observers, "on_round", record)
         if decision.accepted:
             state.accept(name, table, current, imager)
@@ -468,50 +474,57 @@ class Selfcal:
             ImagingRequest(self.ms, os.path.join(self.output, name), self.selection)
         )
 
-    def _check_data(self) -> Tuple[Optional[float], Optional[float]]:
+    def _check_data(
+        self, observers: Sequence[SelfcalObserver]
+    ) -> Tuple[Optional[float], Optional[float], Tuple[str, ...]]:
         """
-        Once per run, after the initial image: the image's thermal noise from the data (#119), and
-        the median of measured noise over SIGMA, warning when the weights misstate the noise
-        (#129). None for what the data can't support
+        Once per run, after the initial image: the image's thermal noise from the data (#119), the
+        median of measured noise over SIGMA (#129), and the run-wide advisories' findings. None
+        for what the data can't support
         """
         sample = preflight.read_sample(self.ms, self.selection)
+        findings = self._advise("at_start", StartContext(self.ms, sample), observers)
         if sample is None:
             logger.debug("No thermal noise estimate for %s", self.ms)
-            return None, None
+            return None, None, findings
         logger.info(
             "Thermal noise from the data: %.3g mJy/beam (natural weighting; a floor for others)",
             sample.thermal_noise * 1e3
         )
-        anomalies = preflight.weight_anomalies(sample)
-        if anomalies:
-            logger.warning("%s: %s", self.ms, anomalies)
         ratios = [ratio for *_, ratio in sample.noise_over_sigma]
-        return sample.thermal_noise, float(median(ratios)) if ratios else None
+        return sample.thermal_noise, float(median(ratios)) if ratios else None, findings
 
-    def _predict_snr(self, step: CalibrationStep, model_imager: Imager) -> Optional[float]:
+    def _predict_snr(
+        self, step: CalibrationStep, model_imager: Imager, observers: Sequence[SelfcalObserver]
+    ) -> Tuple[Optional[float], Tuple[str, ...]]:
         """
         The step's solution S/N predicted from the data, against the accepted model in
-        MODEL_DATA, which model_imager made; warns when it is below minsnr, or when amplitude
-        gains would absorb the source's spectrum (#118). None if the data can't support an
-        estimate
+        MODEL_DATA, which model_imager made, and the advisories' findings before its solve. None
+        if the data can't support an estimate
         """
         sample = preflight.read_sample(self.ms, self.selection)
         if sample is None:
             logger.debug("No solution S/N estimate for %s", _describe(step))
-            return None
+            return None, ()
         prediction = preflight.predict(sample, step, self.solve)
-        if not prediction.enough:
-            logger.warning(
-                "%s: predicted solution S/N %.1f is below minsnr %g, so gaincal may flag most "
-                "solutions; %s", _describe(step), prediction.snr, prediction.minsnr,
-                prediction.advice
-            )
-        absorbed = preflight.absorbed_spectrum(
-            sample, step, self.solve, prediction.snr, model_imager.models_spectrum
-        )
-        if absorbed:
-            logger.warning("%s: %s", _describe(step), absorbed)
-        return prediction.snr
+        context = SolveContext(step, _describe(step), self.solve, sample, prediction, model_imager)
+        return prediction.snr, self._advise("before_solve", context, observers)
+
+    @staticmethod
+    def _advise(hook: str, context: object,
+                observers: Sequence[SelfcalObserver]) -> Tuple[str, ...]:
+        """
+        Runs one hook of every advisory: each finding is logged, sent to the observers and
+        returned for the round's record
+        """
+        findings = []
+        for advisory in ADVISORIES:
+            for finding in getattr(advisory, hook)(context):
+                level = logging.ERROR if finding.severity is Severity.ERROR else logging.WARNING
+                logger.log(level, "%s", finding.message)
+                _notify(observers, "on_finding", finding)
+                findings.append(finding.message)
+        return tuple(findings)
 
     def _solve(self, step: CalibrationStep, stack: CalStack, name: str) -> Optional[CalTable]:
         """
@@ -606,25 +619,6 @@ class Selfcal:
 
 def _default_output(ms: str) -> str:
     return str(Path(ms).with_suffix("")) + "_selfcal"
-
-
-# A residual inside the source mask below this fraction of the thermal noise means the model and
-# the gains are fitting noise there
-OVERFITTING_FRACTION = 0.9
-
-
-def _warn_if_below_thermal(record: RoundRecord) -> None:
-    """
-    Warns when a round's residual inside the source mask is below the thermal noise (#119)
-    """
-    if record.rms_in_mask is None or record.thermal_noise is None:
-        return
-    if record.rms_in_mask < OVERFITTING_FRACTION * record.thermal_noise:
-        logger.warning(
-            "Round %d %s: the residual inside the source mask, %.3g mJy/beam, is below the "
-            "thermal noise, %.3g mJy/beam: the model and the gains may be fitting noise there",
-            record.index, record.step, record.rms_in_mask * 1e3, record.thermal_noise * 1e3
-        )
 
 
 def _describe(step: Optional[CalibrationStep]) -> str:
