@@ -29,7 +29,6 @@ import subprocess
 import sys
 import warnings
 from dataclasses import dataclass, field
-from importlib import metadata
 from types import MappingProxyType
 from typing import ClassVar, Mapping, Sequence, Tuple
 
@@ -43,6 +42,10 @@ from ..contract import Imager, ImagingRequest, ImagingResult
 logger = logging.getLogger(__name__)
 
 WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_pyralysis_worker.py")
+# The Python that runs the worker (#148): Pyralysis may live in an environment of its own, e.g.
+# /opt/pyralysis in Wenuray's images, since its pins conflict with Wenuray's. The worker imports
+# neither wenuray nor casatools, so any Python with Pyralysis runs it. Default: this Python
+PYTHON_SETTING = "WENURAY_PYRALYSIS_PYTHON"
 # Pyralysis CLI options that Wenuray sets, and where each comes from
 CONTROLLED = {
     "input_path": "the request",
@@ -167,11 +170,15 @@ class Pyralysis(Imager):
         )
 
     def provenance(self) -> dict:
-        versions = super().provenance()
-        try:
-            versions["pyralysis"] = metadata.version("pyralysis")
-        except metadata.PackageNotFoundError:
-            pass
+        """
+        Wenuray's distribution, Pyralysis's version, and the packages the worker runs with, as
+        its Python has them. They may come from another environment (#148), so they are kept
+        apart from this one's
+        """
+        worker = _worker_versions(_interpreter())
+        versions = {**super().provenance(), "pyralysis_worker": dict(worker)}
+        if "pyralysis" in worker:
+            versions["pyralysis"] = worker["pyralysis"]
         return versions
 
     def to_recipe(self) -> dict:
@@ -234,13 +241,33 @@ def _check(options: str) -> None:
     _run({"check": True, "options": json.loads(options)})
 
 
-def _run(request: dict, cwd: str = None) -> None:
+@functools.lru_cache(maxsize=8)
+def _worker_versions(interpreter: str) -> dict:
+    """
+    The versions of Pyralysis and the packages it runs with, from the worker; cached per Python
+    """
+    return _run({"versions": True}).get("versions", {})
+
+
+def _interpreter() -> str:
+    return os.environ.get(PYTHON_SETTING) or sys.executable
+
+
+def _run(request: dict, cwd: str = None) -> dict:
+    """
+    Runs the worker with a request and returns its reply, raising its error
+    """
     # -P: the worker's directory holds this module, which would shadow the pyralysis package
-    command = [sys.executable, "-P", WORKER]
+    command = [_interpreter(), "-P", WORKER]
     logger.debug("Running %s", " ".join(command))
-    process = subprocess.run(
-        command, input=json.dumps(request), capture_output=True, text=True, cwd=cwd
-    )
+    try:
+        process = subprocess.run(
+            command, input=json.dumps(request), capture_output=True, text=True, cwd=cwd
+        )
+    except FileNotFoundError:
+        raise ImportError(
+            "{0}={1!r} is not a Python executable".format(PYTHON_SETTING, command[0])
+        ) from None
     lines = process.stdout.strip().splitlines()
     for line in lines[:-1]:
         logger.debug("pyralysis: %s", line)
@@ -249,11 +276,12 @@ def _run(request: dict, cwd: str = None) -> None:
     except json.JSONDecodeError:
         reply = {}
     if process.returncode == 0 and reply.get("error") == "":
-        return
+        return reply
     if reply.get("error", "").startswith("ModuleNotFoundError"):
         raise ImportError(
-            "The Pyralysis imager needs Pyralysis: pip install 'wenuray[pyralysis]' ({0})".format(
-                reply["error"]
+            "The Pyralysis imager needs Pyralysis in {0}: pip install 'wenuray[pyralysis]', or "
+            "set {1} to a Python that has it ({2})".format(
+                command[0], PYTHON_SETTING, reply["error"]
             )
         )
     message = reply.get("error") or process.stderr.strip()[-2000:]

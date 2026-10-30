@@ -254,3 +254,46 @@ class TestUvrangeSelection:
         monkeypatch.setattr(backend, "ms", mock.Mock(side_effect=AssertionError("not needed")))
 
         assert backend._taql("target.ms", Selection(uvrange=">1km")) == LENGTH + " > 1000.0"
+
+
+class TestWorkerEnvironment:
+    """Pyralysis may live in an environment of its own, run by another Python (#148)."""
+
+    @pytest.fixture(autouse=True)
+    def fresh(self):
+        backend._worker_versions.cache_clear()
+
+    def test_the_worker_runs_with_this_python_by_default(self, worker, monkeypatch):
+        monkeypatch.delenv(backend.PYTHON_SETTING, raising=False)
+
+        imager()
+
+        assert worker.requests[-1].command[0] == backend.sys.executable
+
+    def test_the_setting_names_the_worker_python(self, worker, monkeypatch):
+        monkeypatch.setenv(backend.PYTHON_SETTING, "/opt/pyralysis/bin/python")
+
+        imager()
+
+        assert worker.requests[-1].command[:2] == ["/opt/pyralysis/bin/python", "-P"]
+
+    def test_a_python_that_does_not_exist_says_so(self, monkeypatch):
+        monkeypatch.setenv(backend.PYTHON_SETTING, "/no/such/python")
+
+        def missing(command, **kwargs):
+            raise FileNotFoundError(command[0])
+
+        monkeypatch.setattr(backend.subprocess, "run", missing)
+
+        with pytest.raises(ImportError, match="WENURAY_PYRALYSIS_PYTHON='/no/such/python'"):
+            imager()
+
+    def test_the_run_record_takes_pyralysis_from_the_worker(self, worker):
+        worker.reply = {"error": "", "versions": {"pyralysis": "3.3.0", "numpy": "2.3.5"}}
+
+        versions = imager().provenance()
+
+        assert versions["pyralysis"] == "3.3.0"
+        # The worker's numpy is its own environment's, not this one's
+        assert versions["pyralysis_worker"] == {"pyralysis": "3.3.0", "numpy": "2.3.5"}
+        assert worker.requests[-1].request == {"versions": True}
