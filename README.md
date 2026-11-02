@@ -19,7 +19,7 @@ referee can repeat it exactly.
 
 *A simulated ALMA observation of a protoplanetary disk, corrupted with antenna gain errors (left),
 self-calibrated by Wenuray (middle), and without the errors (right); residuals below. Three rounds
-recover the flux the errors scattered and bring the noise to within 3% of the ideal image's. The
+recover the flux the errors scattered and bring the noise to within 1% of the ideal image's. The
 [tutorial](https://wenuray.readthedocs.io/tutorial.html) makes this figure step by step.*
 
 ## Why self-calibration?
