@@ -23,6 +23,16 @@ it in configuration C-10.6 at 345 GHz (Band 7) for two hours, in 30 s integratio
 
 ```{literalinclude} ../examples/simulated/simulate.py
 :language: python
+:start-at: "# ALMA in configuration"
+:end-before: "def main"
+```
+
+The sky and the simulation itself come from
+[`pyralysis_simulation.py`](https://github.com/miguelcarcamov/wenuray/blob/development/examples/pyralysis_simulation.py),
+which other examples can share:
+
+```{literalinclude} ../examples/pyralysis_simulation.py
+:language: python
 :pyobject: observe
 ```
 
@@ -34,12 +44,12 @@ recommends: the multiplicative errors first, then the additive ones, as in a rec
 - **Thermal noise** from the radiometer equation for a 150 K system. Pyralysis also writes the
   `SIGMA` and `WEIGHT` columns to match it.
 
-```{literalinclude} ../examples/simulated/simulate.py
+```{literalinclude} ../examples/pyralysis_simulation.py
 :language: python
 :pyobject: gain_errors
 ```
 
-```{literalinclude} ../examples/simulated/simulate.py
+```{literalinclude} ../examples/pyralysis_simulation.py
 :language: python
 :pyobject: thermal_noise
 ```
@@ -89,16 +99,16 @@ the round only if the image improves. The log tells the story:
 
 | Round | Solution interval | Peak S/N | Image noise | Model flux | Gain corrections / their noise |
 | --- | --- | --- | --- | --- | --- |
-| initial | | 345 | 61.5 µJy/beam | 0.104 Jy | |
-| phase | `inf` | 410 | 51.8 µJy/beam | 0.106 Jy | 6.1 |
-| phase | `int` | 1380 | 25.0 µJy/beam | 0.178 Jy | 14.6 |
-| amplitude and phase | `int` | 1385 | 25.1 µJy/beam | 0.177 Jy | phase 0.2, amplitude 1.4 |
-| *ideal: no gain errors* | | *1416* | *24.4 µJy/beam* | *0.178 Jy* | |
+| initial | | 310 | 59.2 µJy/beam | 0.106 Jy | |
+| phase | `inf` | 380 | 48.4 µJy/beam | 0.107 Jy | 6.3 |
+| phase | `int` | 1215 | 24.7 µJy/beam | 0.179 Jy | 14.5 |
+| amplitude and phase | `int` | 1241 | 24.3 µJy/beam | 0.179 Jy | phase 0.3, amplitude 1.5 |
+| *ideal: no gain errors* | | *1245* | *24.1 µJy/beam* | *0.179 Jy* | |
 
 Before calibration, the phase errors scatter the visibilities so much that they partly cancel out:
-the image holds only 0.104 of the 0.18 Jy. The solution over the whole observation helps a little.
-The solutions every integration recover the flux and bring the noise to within 3% of the ideal
-image's. The last round's corrections are at the level of their own noise (0.2 and 1.4): there was
+the image holds only 0.106 of the 0.18 Jy. The solution over the whole observation helps a little.
+The solutions every integration recover the flux and bring the noise to within 1% of the ideal
+image's. The last round's corrections are at the level of their own noise (0.3 and 1.5): there was
 nothing left to correct, which is what convergence looks like.
 
 ## 4. Look at the results
@@ -132,7 +142,8 @@ found nothing more to correct.
 
 The phases Wenuray found against those injected, relative to the reference antenna. Left: one
 antenna over the two hours, integration by integration. Right: every antenna at every integration.
-They agree to 2.9° rms, against 40° of errors.
+They agree to 3.0° rms. The errors were 40° per antenna, so 56° rms between an antenna and the
+reference.
 ```
 
 ## What the warnings mean
