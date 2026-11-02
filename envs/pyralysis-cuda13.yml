@@ -1,0 +1,32 @@
+# Pyralysis's environment for Wenuray on a GPU with CUDA 13: Turing and newer (compute capability
+# 7.5 and above: RTX 20xx and later, T4, A100, H100, ...). Needs driver R580 or newer. Which file
+# suits your card: envs/README.md.
+#
+# CUDA's toolkit and CuPy come from conda-forge into the environment, which shadows a system CUDA
+# while it is active (unset CUDA_PATH if the shell exports one). Don't also pip install a cupy-*
+# wheel or Pyralysis's cupy extras on top.
+#
+# Create:  micromamba create -f envs/pyralysis-cuda13.yml   (or conda/mamba env create -f ...)
+# Use:     export WENURAY_PYRALYSIS_PYTHON=$(micromamba run -n wenuray-pyralysis-cuda13 which python)
+#
+# Paths in the pip block are relative to this file.
+name: wenuray-pyralysis-cuda13
+
+channels:
+- conda-forge
+
+dependencies:
+  # The interpreter and NumPy of requirements-pyralysis.txt's pins, so pip installs one NumPy only
+- python=3.12
+- numpy=2.3.5
+- pip
+  # The CUDA 13 toolkit (CuPy's libraries, Numba's NVVM) and CuPy 14
+- cuda-version=13.0
+- cuda
+- cupy>=14.0,<15
+- pip:
+  # ska-ost-array-config and the ska-* packages come from SKA's index
+  - --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
+  - -r ../requirements-pyralysis.txt
+    # Numba's CUDA target, a package of its own since Numba 0.61; the toolkit is the one above
+  - numba-cuda==0.30.4
