@@ -1,0 +1,160 @@
+# The gallery's scenarios (docs/gallery.md): two arrays (VLA, ALMA) at a low and a high frequency in
+# a compact and an extended configuration, and MeerKAT below 1 GHz, each observing a target typical
+# for it (skies.py). make_gallery.py simulates, self-calibrates and draws each one.
+#
+# Each target is sized in units of a few resolutions (lambda / the longest baseline), and shrunk
+# when it would be larger than the array images (about 0.6 lambda / the shortest baseline),
+# and its fluxes are in units of the image's thermal noise, so the scenarios have comparable S/N.
+#
+# The gain errors follow the physics. They drift smoothly over a coherence time (minutes, shorter at
+# high frequency and on long baselines, where the turbulence crossing the array changes faster), as
+# the atmosphere's do (DriftingGainInjector in pyralysis_simulation.py; pyralysis#409):
+# - the ionosphere's phase grows towards low frequency (as 1/nu) and with baseline length;
+# - the troposphere's grows with frequency (as nu, after water-vapour correction at ALMA) and with
+# baseline length (as the phase structure function, about B^0.5, up to its outer scale);
+# - amplitude errors grow with frequency (pointing and opacity).
+# The values are this gallery's, chosen to be typical, not measured.
+
+[[scenario]]
+name = "meerkat-uhf"
+sky = "giant_radio_galaxy"
+about = "a giant radio galaxy and field sources"
+title = "MeerKAT"
+subtitle = "816 MHz · up to 8 km"
+configuration = "meerkat.cfg"
+frequency = 816e6
+bandwidth = 0.5e9
+system_temperature = 25.0
+phase_error = 25.0  # ionosphere at UHF over 8 km
+amplitude_error = 0.02
+declination = "-30d00m00s"
+seed = 101
+coherence_time = 600.0
+
+[[scenario]]
+name = "vla-l-d"
+sky = "spiral_galaxy"
+about = "a nearby spiral galaxy"
+title = "VLA D"
+subtitle = "1.5 GHz · up to 1 km"
+configuration = "vla.d.cfg"
+frequency = 1.5e9
+bandwidth = 1e9
+system_temperature = 25.0
+phase_error = 10.0  # ionosphere at L band, short baselines
+amplitude_error = 0.02
+declination = "+34d00m00s"
+seed = 102
+coherence_time = 900.0
+
+[[scenario]]
+name = "vla-l-a"
+sky = "cygnus_a"
+about = "a powerful radio galaxy, Cygnus A-like"
+title = "VLA A"
+subtitle = "1.5 GHz · up to 36 km"
+configuration = "vla.a.cfg"
+frequency = 1.5e9
+bandwidth = 1e9
+system_temperature = 25.0
+phase_error = 35.0  # ionosphere at L band, long baselines
+amplitude_error = 0.02
+declination = "+34d00m00s"
+seed = 103
+coherence_time = 300.0
+
+[[scenario]]
+name = "vla-q-d"
+sky = "star_forming_region"
+about = "compact HII regions in a star-forming region"
+title = "VLA D"
+subtitle = "45 GHz · up to 1 km"
+configuration = "vla.d.cfg"
+frequency = 45e9
+bandwidth = 2e9
+system_temperature = 60.0
+phase_error = 25.0  # troposphere at Q band, short baselines
+amplitude_error = 0.08
+declination = "+34d00m00s"
+seed = 104
+coherence_time = 300.0
+
+[[scenario]]
+name = "vla-q-a"
+sky = "young_disk"
+about = "a young star's disk at 7 mm"
+title = "VLA A"
+subtitle = "45 GHz · up to 36 km"
+configuration = "vla.a.cfg"
+frequency = 45e9
+bandwidth = 2e9
+system_temperature = 60.0
+phase_error = 60.0  # troposphere at Q band, long baselines
+amplitude_error = 0.08
+declination = "+34d00m00s"
+seed = 105
+coherence_time = 120.0
+
+[[scenario]]
+name = "alma-b3-c3"
+sky = "protocluster"
+about = "filaments meeting in a hub of dense cores"
+title = "ALMA C-3"
+subtitle = "100 GHz · up to 500 m"
+configuration = "alma.cycle10.3.cfg"
+frequency = 100e9
+bandwidth = 2e9
+system_temperature = 60.0
+phase_error = 15.0  # troposphere at Band 3, short baselines
+amplitude_error = 0.03
+declination = "-30d00m00s"
+seed = 106
+coherence_time = 600.0
+
+[[scenario]]
+name = "alma-b3-c8"
+sky = "ringed_disk"
+about = "a protoplanetary disk with rings and gaps"
+title = "ALMA C-8"
+subtitle = "100 GHz · up to 8.5 km"
+configuration = "alma.cycle10.8.cfg"
+frequency = 100e9
+bandwidth = 2e9
+system_temperature = 60.0
+phase_error = 35.0  # troposphere at Band 3, long baselines
+amplitude_error = 0.03
+declination = "-30d00m00s"
+seed = 107
+coherence_time = 120.0
+
+[[scenario]]
+name = "alma-b7-c3"
+sky = "lensed_galaxy"
+about = "a gravitationally lensed dusty galaxy"
+title = "ALMA C-3"
+subtitle = "345 GHz · up to 500 m"
+configuration = "alma.cycle10.3.cfg"
+frequency = 345e9
+bandwidth = 2e9
+system_temperature = 150.0
+phase_error = 30.0  # troposphere at Band 7, short baselines
+amplitude_error = 0.08
+declination = "-30d00m00s"
+seed = 108
+coherence_time = 300.0
+
+[[scenario]]
+name = "alma-b7-c8"
+sky = "spiral_disk"
+about = "a protoplanetary disk with rings, gaps and spiral arms"
+title = "ALMA C-8"
+subtitle = "345 GHz · up to 8.5 km"
+configuration = "alma.cycle10.8.cfg"
+frequency = 345e9
+bandwidth = 2e9
+system_temperature = 150.0
+phase_error = 60.0  # troposphere at Band 7, long baselines, after water-vapour correction
+amplitude_error = 0.08
+declination = "-30d00m00s"
+seed = 109
+coherence_time = 60.0

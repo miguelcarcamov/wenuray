@@ -7,6 +7,7 @@
 :caption: Guides
 
 tutorial
+gallery
 installation
 guide
 imagers

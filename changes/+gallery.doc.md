@@ -1,0 +1,1 @@
+A gallery (docs/gallery.md, examples/gallery/): nine simulated scenarios, VLA and ALMA at low and high frequency in compact and extended configurations and MeerKAT at UHF, each observing a target typical for its band with gain errors that drift as the atmosphere's, self-calibrated the same way with tclean and with Pyralysis and drawn before and after.

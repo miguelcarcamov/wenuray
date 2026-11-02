@@ -248,6 +248,9 @@ The documentation is at [wenuray.readthedocs.io](https://wenuray.readthedocs.io/
 - [Tutorial](https://wenuray.readthedocs.io/tutorial.html): simulate an observation with Pyralysis,
   corrupt it with gain errors, self-calibrate it, and check the gains Wenuray finds against those
   put in.
+- [Gallery](https://wenuray.readthedocs.io/gallery.html): the same self-calibration on nine
+  simulated observations, VLA and ALMA at low and high frequency, compact and extended, and
+  MeerKAT below 1 GHz, imaged with tclean and with Pyralysis.
 - [Installation](https://wenuray.readthedocs.io/installation.html): pip, conda, Docker (on CPU or
   GPU), and the optional extras.
 - [How a run works](https://wenuray.readthedocs.io/guide.html): preparing the data, schedules,

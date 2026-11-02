@@ -1,5 +1,5 @@
 """
-Figures for Wenuray's examples (the tutorial), in one style: images in magma with a
+Figures for Wenuray's examples (the tutorial and the gallery), in one style: images in magma with a
 square-root stretch, so faint emission shows beside a bright core; residuals in red and blue on one
 symmetric scale; a beam ellipse and a scale bar on every image; the same colours for "before",
 "after" and "ideal" in every chart.
@@ -10,7 +10,7 @@ writes next to each observation (<ms>.ideal, <ms>.gains.npz).
 import math
 import os
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -44,6 +44,15 @@ def style() -> None:
             "legend.frameon": False,
         }
     )
+
+
+def save(figure, path: str) -> None:
+    """
+    Saves a figure: as WebP at quality 90 for a .webp path, a seventh of a PNG's size for images
+    with no visible difference; otherwise in the format the extension names
+    """
+    options = {"pil_kwargs": {"quality": 90, "method": 6}} if path.endswith(".webp") else {}
+    figure.savefig(path, **options)
 
 
 @dataclass(frozen=True)
@@ -304,7 +313,7 @@ def before_after(
     colorbar(figure, shown, axes[1], "mJy/beam (±6σ of the ideal)")
     if title:
         figure.suptitle(title, fontsize=12, fontweight="bold")
-    figure.savefig(path)
+    save(figure, path)
     plt.close(figure)
 
 
@@ -354,7 +363,7 @@ def convergence(result: SelfcalResult, floor: float, path: str) -> None:
     for axis in axes:
         axis.set_xticks(x, round_labels(result), fontsize=8)
         plain_log(axis, "y")
-    figure.savefig(path)
+    save(figure, path)
     plt.close(figure)
 
 
@@ -423,5 +432,170 @@ def gains(ms: str, result: SelfcalResult, path: str) -> None:
     axes[1].set_xlabel("Injected phase (deg)")
     axes[1].set_ylabel("Self-calibrated phase (deg)")
     axes[1].set_title("All antennas: {0:.1f}° rms difference".format(np.sqrt(np.mean(error**2))))
-    figure.savefig(path)
+    save(figure, path)
+    plt.close(figure)
+
+
+@dataclass(frozen=True)
+class Scenario:
+    """
+    What the gallery shows of one scenario's run
+    """
+    title: str
+    subtitle: str
+    about: str
+    result: SelfcalResult
+    ideal: ImagingResult
+    extent: float
+    phase_error: float  # injected, rms degrees
+    phase_residual: float  # after self-calibration, rms degrees
+    imager: str = "tclean"
+
+
+def gallery(scenarios: Sequence[Scenario], path: str, columns: int = 3) -> None:
+    """
+    One tile per scenario, before (left) and after (right), each on its own scale
+    """
+    import matplotlib.pyplot as plt
+
+    rows = math.ceil(len(scenarios) / columns)
+    figure, axes = plt.subplots(
+        rows,
+        2 * columns,
+        figsize=(4.2 * columns, 2.35 * rows + 0.4),
+        gridspec_kw={
+            "wspace": 0.04,
+            "hspace": 0.32
+        }
+    )
+    axes = np.atleast_2d(axes)
+    for index, scenario in enumerate(scenarios):
+        row, column = divmod(index, columns)
+        cell = cell_of(scenario.result)
+        panels = [
+            Panel.read(p, cell, scenario.extent)
+            for p in (scenario.result.rounds[0].image, scenario.result.final.image)
+        ]
+        norm = image_norm(panels)
+        for side, (panel, record, label) in enumerate(
+            zip(panels, (scenario.result.rounds[0], scenario.result.final), ("before", "after"))
+        ):
+            axis = axes[row, 2 * column + side]
+            draw(axis, panel, norm, "magma", label, "PSNR {0:.0f}".format(record.psnr))
+        axes[row, 2 * column].set_title(
+            "{0} · {1}\n{2}".format(scenario.title, scenario.subtitle, scenario.about),
+            loc="left",
+            fontsize=9,
+            x=0.0
+        )
+    for index in range(len(scenarios), rows * columns):
+        row, column = divmod(index, columns)
+        axes[row, 2 * column].axis("off")
+        axes[row, 2 * column + 1].axis("off")
+    save(figure, path)
+    plt.close(figure)
+
+
+# How each imager's results are marked in the charts that compare them
+MARKERS = {"tclean": "o", "Pyralysis": "s"}
+
+
+def summary(groups: Mapping[str, Sequence[Scenario]], path: str) -> None:
+    """
+    For each scenario and imager: the peak S/N before, after and with no gain errors, and the phase
+    errors injected against those left after self-calibration. groups maps each imager's name to
+    its runs of the same scenarios
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    first = next(iter(groups.values()))
+    names = ["{0}\n{1}".format(s.title, s.subtitle.split("·")[0].strip()) for s in first]
+    rows = np.arange(len(first))[::-1]
+    shifts = np.linspace(0.18, -0.18, len(groups)) if len(groups) > 1 else [0.0]
+    figure, axes = plt.subplots(
+        1, 2, figsize=(12, 0.7 * len(first) + 1.6), constrained_layout=True, sharey=True
+    )
+    for (imager, scenarios), shift in zip(groups.items(), shifts):
+        y = rows + shift
+        marker = MARKERS.get(imager, "o")
+        before = [s.result.rounds[0].psnr for s in scenarios]
+        after = [s.result.final.psnr for s in scenarios]
+        ideal = [s.ideal.statistics().psnr for s in scenarios]
+        axes[0].hlines(y, before, after, color="#bbbbbb", linewidth=2, zorder=1)
+        axes[0].scatter(before, y, color=BEFORE, marker=marker, zorder=2)
+        axes[0].scatter(after, y, color=AFTER, marker=marker, zorder=3)
+        axes[0].scatter(ideal, y, marker="|", s=150, color=IDEAL, zorder=4)
+        injected = [s.phase_error for s in scenarios]
+        left = [s.phase_residual for s in scenarios]
+        axes[1].hlines(y, left, injected, color="#bbbbbb", linewidth=2, zorder=1)
+        axes[1].scatter(injected, y, color=BEFORE, marker=marker, zorder=2)
+        axes[1].scatter(left, y, color=AFTER, marker=marker, zorder=3)
+    colours = [
+        Line2D([], [], color=BEFORE, marker="o", linestyle="", label="before"),
+        Line2D([], [], color=AFTER, marker="o", linestyle="", label="self-calibrated"),
+        Line2D(
+            [], [], color=IDEAL, marker="|", markersize=12, linestyle="", label="no gain errors"
+        ),
+    ]
+    shapes = [
+        Line2D(
+            [], [], color="#888888", marker=MARKERS.get(imager, "o"), linestyle="", label=imager
+        ) for imager in groups
+    ]
+    for axis in axes:
+        axis.set_xscale("log")
+        plain_log(axis)
+    axes[0].set_xlabel("Peak S/N of the image")
+    axes[0].set_yticks(rows, names, fontsize=8)
+    axes[0].legend(
+        handles=colours + shapes, loc="lower left", bbox_to_anchor=(0, 1.0), ncol=5, fontsize=8
+    )
+    axes[1].set_xlabel("Antenna phase errors relative to the reference, rms (deg)")
+    axes[1].legend(
+        handles=[
+            Line2D([], [], color=BEFORE, marker="o", linestyle="", label="injected"),
+            Line2D(
+                [], [], color=AFTER, marker="o", linestyle="", label="left after self-calibration"
+            ),
+        ] + shapes,
+        loc="lower left",
+        bbox_to_anchor=(0, 1.0),
+        ncol=4,
+        fontsize=8
+    )
+    save(figure, path)
+    plt.close(figure)
+
+
+def convergence_all(groups: Mapping[str, Sequence[Scenario]], path: str) -> None:
+    """
+    Each scenario's image noise against its ideal image's, round by round, one panel per imager
+    """
+    import matplotlib.pyplot as plt
+
+    figure, axes = plt.subplots(
+        1, len(groups), figsize=(6.5 * len(groups), 4.4), constrained_layout=True, sharey=True
+    )
+    axes = np.atleast_1d(axes)
+    for axis, (imager, scenarios) in zip(axes, groups.items()):
+        colours = plt.get_cmap("viridis")(np.linspace(0, 0.9, len(scenarios)))
+        for scenario, colour in zip(scenarios, colours):
+            floor = scenario.ideal.statistics().rms
+            rounds = scenario.result.rounds
+            axis.plot(
+                range(len(rounds)), [r.rms / floor for r in rounds],
+                "o-",
+                color=colour,
+                label=scenario.title + " · " + scenario.subtitle.split("·")[0].strip()
+            )
+        axis.axhline(1, color=IDEAL, linestyle=":")
+        axis.set_yscale("log")
+        plain_log(axis, "y")
+        longest = max((s.result for s in scenarios), key=lambda result: len(result.rounds))
+        axis.set_xticks(range(len(longest.rounds)), round_labels(longest), fontsize=8)
+        axis.set_title(imager, loc="left")
+    axes[0].set_ylabel("Image noise / ideal image's")
+    axes[-1].legend(fontsize=7, ncol=2, loc="upper right")
+    save(figure, path)
     plt.close(figure)
