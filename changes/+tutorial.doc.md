@@ -1,0 +1,1 @@
+A tutorial (docs/tutorial.md, examples/simulated/): simulate an ALMA observation of a disk with Pyralysis, corrupt it with antenna gain errors and thermal noise, self-calibrate it with Wenuray, and compare the images and the recovered gains with the truth. The README shows its before/after figure, and links the documentation on Read the Docs.

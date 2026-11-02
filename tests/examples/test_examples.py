@@ -198,6 +198,7 @@ def by_name(selfcal: Selfcal) -> Selfcal:
         ("alma", ["target.ms", "target_selfcal"]),
         ("vla", ["target.ms", "target_selfcal"]),
         ("emerlin", ["target.ms", "target_selfcal", "1252+5634"]),
+        ("simulated", ["tutorial.ms", "tutorial_selfcal"]),
     ]
 )
 def test_each_recipe_builds_its_script_run(name, args, runs, casatasks_module, monkeypatch):

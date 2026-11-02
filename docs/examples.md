@@ -44,3 +44,20 @@ The values belong to each example's data, not to wenuray: adapt them to yours.
 ```{literalinclude} ../examples/emerlin/selfcal.py
 :language: python
 ```
+
+## Simulated ALMA observation
+
+The [tutorial](tutorial.md)'s example: `simulate.py` makes the data with Pyralysis, and
+`make_figures.py` draws the results.
+
+### Simulated recipe
+
+```{literalinclude} ../examples/simulated/recipe.toml
+:language: toml
+```
+
+### Simulated script
+
+```{literalinclude} ../examples/simulated/selfcal.py
+:language: python
+```

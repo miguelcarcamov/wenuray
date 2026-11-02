@@ -10,6 +10,7 @@ test checks it):
 | --- | --- |
 | [`alma/`](alma/) | Phase rounds with spectral windows combined, then amplitude-phase per spectral window, cleaned deeper; automasking for long baselines |
 | [`vla/`](vla/) | Phase then amplitude-phase, `gaintype = "G"`, primary-beam correction |
+| [`simulated/`](simulated/) | The [tutorial](https://wenuray.readthedocs.io/tutorial.html)'s simulated ALMA observation: `simulate.py` makes the data with Pyralysis (a disk, antenna gain errors, thermal noise), the recipe self-calibrates it with an `"auto"` cell and phase then amplitude-phase rounds every integration, and `make_figures.py` draws the results |
 | [`emerlin/`](emerlin/) | Continuing from an existing phase table (`initial_stack`), amplitude-phase rounds from long to short solints, residual RFI flagging in each round, `applymode = "calonly"`, multiscale clean; the script also splits the target and flags RFI before self-calibrating |
 
 The values (cell sizes, automasking thresholds, reference antennas, solution intervals) belong to

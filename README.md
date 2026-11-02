@@ -15,6 +15,13 @@ tclean, Pyralysis or your own imager, solves for phases and then amplitudes roun
 keeps a round only if it really improves the image. Every run records what it did, so you or a
 referee can repeat it exactly.
 
+![A simulated disk before self-calibration, after it, and without gain errors](docs/_static/tutorial/images.png)
+
+*A simulated ALMA observation of a protoplanetary disk, corrupted with antenna gain errors (left),
+self-calibrated by Wenuray (middle), and without the errors (right); residuals below. Three rounds
+recover the flux the errors scattered and bring the noise to within 3% of the ideal image's. The
+[tutorial](https://wenuray.readthedocs.io/tutorial.html) makes this figure step by step.*
+
 ## Why self-calibration?
 
 An interferometer measures visibilities, and every antenna *i* multiplies what it sees by its own
@@ -236,15 +243,24 @@ change or run; `selfcal.to_toml(...)` writes it back.
 
 ## Learn more
 
-- [How a run works](https://github.com/miguelcarcamov/wenuray/blob/development/docs/guide.md):
-  preparing the data, schedules, acceptance, recipes and presets, resuming, and an API overview.
-- [Imagers](https://github.com/miguelcarcamov/wenuray/blob/development/docs/imagers.md): the
-  imager contract, the Nyquist-cell check, tclean, Pyralysis and writing your own.
-- [Examples](https://github.com/miguelcarcamov/wenuray/tree/development/examples): ALMA, VLA and
-  e-MERLIN, each as a recipe and the script that builds the same run.
-- [Migrating from snow](https://github.com/miguelcarcamov/wenuray/blob/development/docs/migration.md):
-  code written for snow, the name before Wenuray 1.0, raises an error that shows the new call.
-- [API reference](https://wenuray.readthedocs.io/) on Read the Docs.
+The documentation is at [wenuray.readthedocs.io](https://wenuray.readthedocs.io/):
+
+- [Tutorial](https://wenuray.readthedocs.io/tutorial.html): simulate an observation with Pyralysis,
+  corrupt it with gain errors, self-calibrate it, and check the gains Wenuray finds against those
+  put in.
+- [Installation](https://wenuray.readthedocs.io/installation.html): pip, conda, Docker (on CPU or
+  GPU), and the optional extras.
+- [How a run works](https://wenuray.readthedocs.io/guide.html): preparing the data, schedules,
+  acceptance, the checks Wenuray makes, recipes and presets, calibrating other data, resuming, and
+  an API overview.
+- [Imagers](https://wenuray.readthedocs.io/imagers.html): the imager contract, the Nyquist-cell
+  check, the `"auto"` grid, tclean, Pyralysis and writing your own.
+- [Examples](https://wenuray.readthedocs.io/examples.html): ALMA, VLA, e-MERLIN and the simulated
+  observation, each as a recipe and the script that builds the same run.
+- [Migrating from snow](https://wenuray.readthedocs.io/migration.html): code written for snow, the
+  name before Wenuray 1.0, raises an error that shows the new call.
+- [Changelog](https://wenuray.readthedocs.io/changelog.html) and the
+  [API reference](https://wenuray.readthedocs.io/api/wenuray/index.html).
 
 ## About the name
 
