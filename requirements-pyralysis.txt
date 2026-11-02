@@ -30,7 +30,7 @@ distributed==2024.10.0
 docstring_parser==0.18.0
 donfig==0.8.1.post1
 ducc0==0.42.0
-filelock==3.32.7
+filelock==4.2.1
 fonttools==4.68.0
 fsspec==2026.9.0
 gitdb==4.0.12
