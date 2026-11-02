@@ -1,0 +1,29 @@
+# Self-calibration of the tutorial's simulated ALMA observation (docs/tutorial.md): a disk whose
+# antenna gains change every integration. Make the data first with simulate.py. The values (the
+# reference antenna, the image size, the solution intervals) are this example's.
+
+ms = "tutorial.ms"
+output = "tutorial_selfcal"
+
+[solve]
+refant = "A042"  # the antenna nearest the array's centre
+
+[imager]
+type = "tclean"
+niter = 2000
+nsigma = 3.0
+usemask = "auto-multithresh"
+# The cell comes from the data's Nyquist cell; 256 pixels hold the disk and some sky around it
+geometry = {imsize = 256, cell = "auto"}
+
+[[steps]]  # phases over the whole observation: the gains change too fast for it
+type = "phase"
+solint = "inf"
+
+[[steps]]  # phases every integration, as fast as the gains change
+type = "phase"
+solint = "int"
+
+[[steps]]  # amplitudes and phases every integration, now that the model is good
+type = "ampphase"
+solint = "int"

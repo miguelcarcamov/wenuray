@@ -104,6 +104,7 @@ wenuray = "wenuray.cli:main"
 # Project URLs (homepage, repository, documentation, etc.)
 [project.urls]
 Changelog = "https://github.com/miguelcarcamov/wenuray/blob/master/CHANGELOG.md"
+Documentation = "https://wenuray.readthedocs.io/"
 Homepage = "https://github.com/miguelcarcamov/wenuray"
 Repository = "https://github.com/miguelcarcamov/wenuray"
 Source = "https://github.com/miguelcarcamov/wenuray"
