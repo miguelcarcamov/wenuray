@@ -52,6 +52,7 @@ dependencies = [
   "casatools>=6.7",
   "multimethod>=1.11",  # Pyralysis 3.0 pins 1.11.2
   "numpy>=1.26",
+  "six>=1.16",  # casatasks imports it without declaring it; python-dateutil 4 no longer brings it (#157)
   "tomli-w>=1.0"
 ]
 description = "A Python object oriented framework to do radio-interferometric self-calibration"
