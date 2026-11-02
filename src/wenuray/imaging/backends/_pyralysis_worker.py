@@ -7,6 +7,7 @@ imports neither wenuray nor casatools. It reads a JSON request from stdin and pr
 as the last line of its output (Pyralysis prints its progress before it):
 
     {"check": true, "options": {...}}                    -> {"error": ""} (validates the options)
+    {"versions": true}                                   -> {"error": "", "versions": {...}}
     {"ms": ..., "taql": ..., "options": {...}, "outputs": {"model": ..., "residual": ..., "restored": ...}}
                                                          -> {"error": ""} after writing MODEL_DATA
 """
@@ -177,6 +178,26 @@ def require_pyralysis(minimum: tuple = MINIMUM_PYRALYSIS) -> None:
         )
 
 
+# What a run record names of the worker's environment, when installed: Pyralysis, and the packages
+# its results depend on, on CPU and GPU
+VERSIONED = (
+    "pyralysis", "numpy", "numba", "numba-cuda", "dask", "python-casacore", "cupy-cuda12x",
+    "cupy-cuda13x"
+)
+
+
+def versions() -> dict:
+    from importlib.metadata import PackageNotFoundError, version
+
+    found = {}
+    for distribution in VERSIONED:
+        try:
+            found[distribution] = version(distribution)
+        except PackageNotFoundError:
+            pass
+    return found
+
+
 class ThreadingLayerError(RuntimeError):
     pass
 
@@ -218,6 +239,9 @@ def main() -> int:
     try:
         require_pyralysis()
         require_thread_safe_numba()
+        if request.get("versions"):
+            print(json.dumps({"error": "", "versions": versions()}))
+            return 0
         if request.get("check"):
             parse(request["options"], ["--input-path", "check.ms"])
         else:

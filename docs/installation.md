@@ -59,21 +59,60 @@ conda activate wenuray-env
 The environment provides Python 3.12 and the pinned dependencies from `requirements.txt`; then
 install Wenuray itself with `pip install -e .` (from a clone) or `pip install wenuray`.
 
+### Pyralysis, on CPU or GPU
+
+Pyralysis's pins conflict with Wenuray's, so it gets an environment of its own, which Wenuray's
+Pyralysis imager runs in. [`envs/`](https://github.com/miguelcarcamov/wenuray/tree/development/envs)
+has one file for CPU and one for each CUDA line, since each CUDA release supports other GPUs:
+
+| File | GPUs |
+| --- | --- |
+| `pyralysis-cpu.yml` | none |
+| `pyralysis-cuda11.yml` | Kepler (Tesla K40, K80) |
+| `pyralysis-cuda12.yml` | Maxwell, Pascal, Volta (GTX 9xx and 10xx, P100, V100) |
+| `pyralysis-cuda13.yml` | Turing and newer (RTX 20xx and later, T4, A100, H100) |
+
+```bash
+micromamba create -f envs/pyralysis-cuda12.yml       # or conda env create -f ...
+export WENURAY_PYRALYSIS_PYTHON=$(micromamba run -n wenuray-pyralysis-cuda12 which python)
+```
+
+The CUDA environments bring the toolkit and CuPy from conda-forge, so the host needs only the NVIDIA
+driver. [`envs/README.md`](https://github.com/miguelcarcamov/wenuray/blob/development/envs/README.md)
+has each file's minimum driver and how to check your card.
+
 ## With Docker
+
+Two images, both with tclean and Pyralysis:
+
+| Image | For | Size (unpacked) |
+| --- | --- | --- |
+| `ghcr.io/miguelcarcamov/wenuray:latest` | Pyralysis on CPU | about 1.7 GB |
+| `ghcr.io/miguelcarcamov/wenuray:gpu` | Pyralysis on CUDA 12 | about 4.8 GB |
 
 ```bash
 docker pull ghcr.io/miguelcarcamov/wenuray:latest
-```
-
-The image has Python 3.12, Wenuray with its pinned dependencies, and CASA's measures data and
-observatory table in `/opt/casa/data`, readable by any user (also under Apptainer/Singularity). To
-stay small it has no CUDA, and it skips the rest of casarundata (antenna responses and simulator
-files, used by e.g. the `awproject` gridder); mount a full copy at `/opt/casa/data` if you need it.
-
-```bash
 docker run --rm -v "$PWD":/work -w /work ghcr.io/miguelcarcamov/wenuray:latest \
   wenuray run recipe.toml
 ```
+
+Each image has Python 3.12; Wenuray with its pinned dependencies in `/opt/venv`; Pyralysis in an
+environment of its own, `/opt/pyralysis` (its pins conflict with Wenuray's, and its worker runs with
+that Python, set by `WENURAY_PYRALYSIS_PYTHON`); and CASA's measures data and observatory table in
+`/opt/casa/data`, readable by any user (also under Apptainer/Singularity). To stay small it skips the
+rest of casarundata (antenna responses and simulator files, used by e.g. the `awproject` gridder);
+mount a full copy at `/opt/casa/data` if you need it.
+
+**On a GPU**, `:gpu` adds CuPy and numba-cuda with the CUDA 12 libraries as NVIDIA's pip wheels, so
+the host needs only the NVIDIA driver (525 or later, which supports Pascal GPUs and newer) and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/):
+
+```bash
+docker run --rm --gpus all -v "$PWD":/work -w /work ghcr.io/miguelcarcamov/wenuray:gpu \
+  wenuray run recipe.toml
+```
+
+Apptainer/Singularity runs it with `--nv`. Pyralysis's own options select its GPU backend.
 
 CASA needs a writable home directory. Apptainer/Singularity provides yours; with `docker run -u`,
 also pass `-e HOME=/tmp`.

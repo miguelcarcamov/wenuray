@@ -8,9 +8,11 @@ import pytest
 from casatasks import flagdata
 from casatools import table
 
-from wenuray.config import ImageGeometry, SolveOptions
+from wenuray.config import ImageGeometry, Selection, SolveOptions
 from wenuray.imaging.backends import Tclean
+from wenuray.imaging.contract import ImagingRequest
 from wenuray.selfcalibration.loop import Selfcal
+from wenuray.selfcalibration.preflight import read_sample
 from wenuray.selfcalibration.steps import Phasecal
 from wenuray.testing import simulate_point_source_ms
 from wenuray.utils.selfcal_utils import get_spw_ids, open_table
@@ -131,3 +133,13 @@ def test_a_flagged_spw_still_holds_the_combined_solutions(ms_with_a_flagged_spw)
             assert not np.allclose(unflagged.getcol("DATA"), unflagged.getcol("CORRECTED_DATA"))
         finally:
             unflagged.close()
+
+
+def test_the_solution_snr_counts_the_channels_of_the_spectral_windows_with_data(tmp_path):
+    # Before the fix spw 0, which holds no data, was counted too: two windows of one channel, so
+    # a spw-combined prediction was sqrt(2) too high
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+    move_data_to_a_second_spw(ms)
+    IMAGER.image(ImagingRequest(ms, str(tmp_path / "model")))
+
+    assert read_sample(ms, Selection()).channels == (1, )

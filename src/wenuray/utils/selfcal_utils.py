@@ -153,6 +153,23 @@ def count_spectral_windows(ms_name: str = "") -> int:
     return get_table_rows(ms_name + "/SPECTRAL_WINDOW")
 
 
+def channel_edges(spw_table, spw: int) -> Tuple[float, float]:
+    """
+    Function that returns the lowest and highest frequency a spectral window covers, in Hz, channel
+    widths included
+
+    Parameters
+    ----------
+    spw_table :
+        The SPECTRAL_WINDOW table of a measurement set or a calibration table, open
+    spw :
+        Spectral window id (its row)
+    """
+    frequencies = np.asarray(spw_table.getcell("CHAN_FREQ", spw))
+    half_widths = np.abs(np.asarray(spw_table.getcell("CHAN_WIDTH", spw))) / 2
+    return float(np.min(frequencies - half_widths)), float(np.max(frequencies + half_widths))
+
+
 def get_spw_ids(ms_name: str = "", spw: str = "") -> list:
     """
     Function that returns the ids of the spectral windows selected by a CASA spw selection

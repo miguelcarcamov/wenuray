@@ -19,6 +19,7 @@ and python-casacore, which Pyralysis reads measurement sets with, crash in one p
 """
 from __future__ import annotations
 
+import dataclasses
 import functools
 import json
 import logging
@@ -28,7 +29,6 @@ import subprocess
 import sys
 import warnings
 from dataclasses import dataclass, field
-from importlib import metadata
 from types import MappingProxyType
 from typing import ClassVar, Mapping, Sequence, Tuple
 
@@ -42,6 +42,10 @@ from ..contract import Imager, ImagingRequest, ImagingResult
 logger = logging.getLogger(__name__)
 
 WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_pyralysis_worker.py")
+# The Python that runs the worker (#148): Pyralysis may live in an environment of its own, e.g.
+# /opt/pyralysis in Wenuray's images, since its pins conflict with Wenuray's. The worker imports
+# neither wenuray nor casatools, so any Python with Pyralysis runs it. Default: this Python
+PYTHON_SETTING = "WENURAY_PYRALYSIS_PYTHON"
 # Pyralysis CLI options that Wenuray sets, and where each comes from
 CONTROLLED = {
     "input_path": "the request",
@@ -130,7 +134,10 @@ class Pyralysis(Imager):
         object.__setattr__(self, "terms", terms)
         object.__setattr__(self, "optimizer", optimizer)
         object.__setattr__(self, "options", MappingProxyType(dict(pyralysis_options)))
-        _check(json.dumps(self._cli_options(), sort_keys=True))
+        # An "auto" grid is derived when the run starts (#67); the other options are checked now,
+        # with a stand-in grid
+        stand_in = dataclasses.replace(geometry, imsize=(2, 2), cell="1arcsec")
+        _check(json.dumps(self._cli_options(stand_in if geometry.auto else None), sort_keys=True))
         if self.options.get("mask_mode", "none") == "none":
             warnings.warn(
                 "Pyralysis without a mask: a model free in every pixel can absorb the gain errors "
@@ -139,6 +146,12 @@ class Pyralysis(Imager):
                 UserWarning,
                 stacklevel=2
             )
+
+    @property
+    def models_spectrum(self) -> bool:
+        # A spectral index, a number or the path of an alpha map; 0 is a flat spectrum
+        index = self.options.get("spectral_index")
+        return index is not None and not (isinstance(index, (int, float)) and index == 0)
 
     def with_overrides(self, **overrides) -> Pyralysis:
         """
@@ -157,11 +170,15 @@ class Pyralysis(Imager):
         )
 
     def provenance(self) -> dict:
-        versions = super().provenance()
-        try:
-            versions["pyralysis"] = metadata.version("pyralysis")
-        except metadata.PackageNotFoundError:
-            pass
+        """
+        Wenuray's distribution, Pyralysis's version, and the packages the worker runs with, as
+        its Python has them. They may come from another environment (#148), so they are kept
+        apart from this one's
+        """
+        worker = _worker_versions(_interpreter())
+        versions = {**super().provenance(), "pyralysis_worker": dict(worker)}
+        if "pyralysis" in worker:
+            versions["pyralysis"] = worker["pyralysis"]
         return versions
 
     def to_recipe(self) -> dict:
@@ -171,15 +188,16 @@ class Pyralysis(Imager):
     def from_recipe(cls, table: Mapping) -> Pyralysis:
         return cls(**recipe.decode_configs(table, geometry=ImageGeometry, weighting=Weighting))
 
-    def _cli_options(self) -> dict:
+    def _cli_options(self, geometry: ImageGeometry = None) -> dict:
         """
-        The Pyralysis CLI options, by destination name
+        The Pyralysis CLI options, by destination name, with the imager's grid or another
         """
-        nx, ny = self.geometry.imsize
+        geometry = geometry or self.geometry
+        nx, ny = geometry.imsize
         options = {
             "imsize": nx if nx == ny else "{0},{1}".format(nx, ny),
-            "cellsize": self.geometry.cell,
-            "stokes": self.geometry.stokes,
+            "cellsize": geometry.cell,
+            "stokes": geometry.stokes,
             "weighting": WEIGHTINGS[self.weighting.weighting],
             "term": list(self.terms),
             "optimizer": self.optimizer,
@@ -223,13 +241,62 @@ def _check(options: str) -> None:
     _run({"check": True, "options": json.loads(options)})
 
 
-def _run(request: dict, cwd: str = None) -> None:
+@functools.lru_cache(maxsize=8)
+def _worker_versions(interpreter: str) -> dict:
+    """
+    The versions of Pyralysis and the packages it runs with, from the worker; cached per Python
+    """
+    return _run({"versions": True}).get("versions", {})
+
+
+def pyralysis_available() -> bool:
+    """
+    Whether the worker's Python (WENURAY_PYRALYSIS_PYTHON, or this one) has a Pyralysis Wenuray
+    can use: asked of the worker, since Pyralysis may live in another environment (#148)
+    """
+    try:
+        return "pyralysis" in _worker_versions(_interpreter())
+    except (ImportError, RuntimeError):
+        return False
+
+
+def _interpreter() -> str:
+    return os.environ.get(PYTHON_SETTING) or sys.executable
+
+
+def _worker_environment(interpreter: str):
+    """
+    The worker's environment variables: this process's, and, when its Python is a conda
+    environment's (#155), CONDA_PREFIX set to that environment, as activating it would. CuPy finds
+    the CUDA libraries the environment installed (envs/pyralysis-cuda*.yml) through it; without it,
+    it may load a system CUDA's instead, built for other GPUs. None keeps this process's
+    """
+    prefix = os.path.dirname(os.path.dirname(os.path.abspath(interpreter)))
+    if not os.path.isdir(os.path.join(prefix, "conda-meta")):
+        return None
+    return {**os.environ, "CONDA_PREFIX": prefix}
+
+
+def _run(request: dict, cwd: str = None) -> dict:
+    """
+    Runs the worker with a request and returns its reply, raising its error
+    """
     # -P: the worker's directory holds this module, which would shadow the pyralysis package
-    command = [sys.executable, "-P", WORKER]
+    command = [_interpreter(), "-P", WORKER]
     logger.debug("Running %s", " ".join(command))
-    process = subprocess.run(
-        command, input=json.dumps(request), capture_output=True, text=True, cwd=cwd
-    )
+    try:
+        process = subprocess.run(
+            command,
+            input=json.dumps(request),
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=_worker_environment(command[0])
+        )
+    except FileNotFoundError:
+        raise ImportError(
+            "{0}={1!r} is not a Python executable".format(PYTHON_SETTING, command[0])
+        ) from None
     lines = process.stdout.strip().splitlines()
     for line in lines[:-1]:
         logger.debug("pyralysis: %s", line)
@@ -238,11 +305,12 @@ def _run(request: dict, cwd: str = None) -> None:
     except json.JSONDecodeError:
         reply = {}
     if process.returncode == 0 and reply.get("error") == "":
-        return
+        return reply
     if reply.get("error", "").startswith("ModuleNotFoundError"):
         raise ImportError(
-            "The Pyralysis imager needs Pyralysis: pip install 'wenuray[pyralysis]' ({0})".format(
-                reply["error"]
+            "The Pyralysis imager needs Pyralysis in {0}: pip install 'wenuray[pyralysis]', or "
+            "set {1} to a Python that has it ({2})".format(
+                command[0], PYTHON_SETTING, reply["error"]
             )
         )
     message = reply.get("error") or process.stderr.strip()[-2000:]

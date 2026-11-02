@@ -103,6 +103,21 @@ class TestConstruction:
 
 class TestOptions:
 
+    @pytest.mark.parametrize(
+        "options, expected",
+        [
+            ({}, False), ({
+                "spectral_index": 0.0
+            }, False), ({
+                "spectral_index": 3.2
+            }, True), ({
+                "spectral_index": "alpha.fits"
+            }, True)
+        ],
+    )
+    def test_models_spectrum(self, options, expected):
+        assert imager(**options).models_spectrum is expected
+
     def test_config_objects_map_to_pyralysis_names(self):
         options = Pyralysis(
             ImageGeometry(imsize=(256, 128), cell="0.1arcsec", stokes="I"),
@@ -239,3 +254,82 @@ class TestUvrangeSelection:
         monkeypatch.setattr(backend, "ms", mock.Mock(side_effect=AssertionError("not needed")))
 
         assert backend._taql("target.ms", Selection(uvrange=">1km")) == LENGTH + " > 1000.0"
+
+
+class TestWorkerEnvironment:
+    """Pyralysis may live in an environment of its own, run by another Python (#148)."""
+
+    @pytest.fixture(autouse=True)
+    def fresh(self):
+        backend._worker_versions.cache_clear()
+
+    def test_the_worker_runs_with_this_python_by_default(self, worker, monkeypatch):
+        monkeypatch.delenv(backend.PYTHON_SETTING, raising=False)
+
+        imager()
+
+        assert worker.requests[-1].command[0] == backend.sys.executable
+
+    def test_the_setting_names_the_worker_python(self, worker, monkeypatch):
+        monkeypatch.setenv(backend.PYTHON_SETTING, "/opt/pyralysis/bin/python")
+
+        imager()
+
+        assert worker.requests[-1].command[:2] == ["/opt/pyralysis/bin/python", "-P"]
+
+    def test_a_conda_environments_python_runs_as_if_activated(self, worker, monkeypatch, tmp_path):
+        """#155: CuPy finds the environment's CUDA through CONDA_PREFIX, not a system CUDA"""
+        (tmp_path / "conda-meta").mkdir()
+        monkeypatch.setenv(backend.PYTHON_SETTING, str(tmp_path / "bin" / "python"))
+        monkeypatch.setenv("CONDA_PREFIX", "/somewhere/else")
+
+        imager()
+
+        assert worker.requests[-1].env["CONDA_PREFIX"] == str(tmp_path)
+        assert worker.requests[-1].env["PATH"] == backend.os.environ["PATH"]
+
+    def test_another_python_keeps_this_environment(self, worker, monkeypatch, tmp_path):
+        monkeypatch.setenv(backend.PYTHON_SETTING, str(tmp_path / "bin" / "python"))
+
+        imager()
+
+        assert worker.requests[-1].env is None
+
+    def test_a_python_that_does_not_exist_says_so(self, monkeypatch):
+        monkeypatch.setenv(backend.PYTHON_SETTING, "/no/such/python")
+
+        def missing(command, **kwargs):
+            raise FileNotFoundError(command[0])
+
+        monkeypatch.setattr(backend.subprocess, "run", missing)
+
+        with pytest.raises(ImportError, match="WENURAY_PYRALYSIS_PYTHON='/no/such/python'"):
+            imager()
+
+    def test_the_run_record_takes_pyralysis_from_the_worker(self, worker):
+        worker.reply = {"error": "", "versions": {"pyralysis": "3.3.0", "numpy": "2.3.5"}}
+
+        versions = imager().provenance()
+
+        assert versions["pyralysis"] == "3.3.0"
+        # The worker's numpy is its own environment's, not this one's
+        assert versions["pyralysis_worker"] == {"pyralysis": "3.3.0", "numpy": "2.3.5"}
+        assert worker.requests[-1].request == {"versions": True}
+
+
+class TestAvailability:
+    """Whether Pyralysis is there is asked of the worker's Python, not this one (#148)."""
+
+    @pytest.fixture(autouse=True)
+    def fresh(self):
+        backend._worker_versions.cache_clear()
+
+    def test_available_when_the_worker_reports_it(self, worker):
+        worker.reply = {"error": "", "versions": {"pyralysis": "3.3.0"}}
+
+        assert backend.pyralysis_available()
+
+    def test_unavailable_when_the_worker_lacks_it(self, worker):
+        worker.reply, worker.returncode = {"error": "ModuleNotFoundError: pyralysis"}, 1
+
+        assert not backend.pyralysis_available()

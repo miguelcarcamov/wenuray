@@ -79,3 +79,24 @@ def test_invalid_beam_raises(beam):
 def test_rms_must_be_positive():
     with pytest.raises(ValueError, match="rms"):
         ImageStatistics(peak=1.0, rms=0.0, model_flux=1.0)
+
+
+def test_the_residual_inside_the_mask_is_measured(images):
+    restored, residual, model, _ = images
+    mask = np.zeros((128, 128), dtype=bool)
+    mask[16:48, 16:48] = True  # away from the source residual: noise only
+
+    statistics = ImageStatistics.from_arrays(restored, residual, model, source_mask=mask)
+
+    assert statistics.rms_in_mask == pytest.approx(1e-3, rel=0.1)
+
+
+@pytest.mark.parametrize("pixels", [0, 4])
+def test_no_residual_inside_a_missing_or_tiny_mask(images, pixels):
+    restored, residual, model, _ = images
+    mask = None
+    if pixels:
+        mask = np.zeros((128, 128), dtype=bool)
+        mask[:2, :2] = True
+
+    assert ImageStatistics.from_arrays(restored, residual, model, mask).rms_in_mask is None

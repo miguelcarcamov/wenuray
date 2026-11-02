@@ -23,6 +23,7 @@ from .. import recipe
 from ..imaging.statistics import ImageStatistics
 
 if TYPE_CHECKING:
+    from .diagnostics import GainDiagnostics
     from .steps import CalibrationStep
 
 
@@ -57,12 +58,15 @@ class RoundMetrics:
         Number of antennas with unflagged solutions in each solution interval
     extra :
         Further metrics by name, for checks of your own (e.g. closure-phase residuals in VLBI)
+    gains :
+        Diagnostics of the round's gain table (#126); None for the initial image
     """
     statistics: ImageStatistics
     step: Optional[CalibrationStep] = None
     flagged_fraction: float = 0.0
     antennas_per_solution: Tuple[int, ...] = ()
     extra: Mapping = field(default_factory=dict, hash=False)
+    gains: Optional["GainDiagnostics"] = None
 
     def __post_init__(self):
         if not 0.0 <= self.flagged_fraction <= 1.0:

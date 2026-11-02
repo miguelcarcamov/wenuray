@@ -4,6 +4,7 @@ round, written as TOML next to the run's outputs so the run can be reproduced an
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -11,7 +12,10 @@ from typing import Mapping, Optional, Tuple
 
 import tomli_w
 
+from ..config import Selection
+from .application import Application, apply_to
 from .caltable import CalStack
+from .diagnostics import GainDiagnostics
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,19 @@ class RoundRecord:
         it flagged
     predicted_snr :
         The step's solution S/N predicted from the data before solving (#28), if it could be
+    rms_in_mask :
+        Noise of the residual inside the source mask, if the imager wrote a mask (#119)
+    thermal_noise :
+        Thermal noise of the image, from the data (#119), if it could be estimated: the floor rms
+        approaches. For briggs or uniform weighting it is the natural-weighting floor
+    noise_over_sigma :
+        Initial image only: the median over baselines of the data's measured noise over the noise
+        their SIGMA states (#129); near 1 when the weights are right
+    gains :
+        Diagnostics of the round's gain table (#126): its corrections against their noise, the
+        antennas that stand out and the two polarizations compared
+    findings :
+        What the advisories found in the round, or in the data for the initial one (#141)
     """
     index: int
     step: str
@@ -59,6 +76,11 @@ class RoundRecord:
     reasons: Tuple[str, ...] = ()
     data_flagged: Optional[Tuple[float, float]] = None
     predicted_snr: Optional[float] = None
+    rms_in_mask: Optional[float] = None
+    thermal_noise: Optional[float] = None
+    noise_over_sigma: Optional[float] = None
+    gains: Optional[GainDiagnostics] = None
+    findings: Tuple[str, ...] = ()
 
     def __post_init__(self):
         if self.beam is not None:
@@ -66,6 +88,9 @@ class RoundRecord:
         if self.data_flagged is not None:
             object.__setattr__(self, "data_flagged", tuple(self.data_flagged))
         object.__setattr__(self, "reasons", tuple(self.reasons))
+        object.__setattr__(self, "findings", tuple(self.findings))
+        if isinstance(self.gains, Mapping):
+            object.__setattr__(self, "gains", GainDiagnostics(**self.gains))
 
 
 @dataclass(frozen=True)
@@ -85,14 +110,48 @@ class SelfcalResult:
     provenance :
         How the run can be reproduced (#36): when it started, the recipe written next to the
         result, a fingerprint of the input data (ms_fingerprint) and the software versions
+    applications :
+        Other data the accepted calibration was applied to (#68), in order
     """
     ms: str
     stack: CalStack
     rounds: Tuple[RoundRecord, ...] = field(default=())
     provenance: Mapping = field(default_factory=dict, hash=False)
+    applications: Tuple[Application, ...] = field(default=())
 
     def __post_init__(self):
         object.__setattr__(self, "rounds", tuple(self.rounds))
+        object.__setattr__(self, "applications", tuple(self.applications))
+
+    def apply_to(
+        self,
+        ms: str,
+        selection: Selection = Selection(),
+        applymode: str = "calflag"
+    ) -> SelfcalResult:
+        """
+        Applies the accepted calibration to other data of the same observation, e.g. the line
+        data, and returns the result with the application recorded (write it with to_toml). Each
+        table's spwmap is derived for ms: its spectral windows are matched to the tables' by
+        frequency, so a split measurement set works.
+
+        Parameters
+        ----------
+        ms :
+            The measurement set to calibrate; its CORRECTED_DATA is written
+        selection :
+            The data to calibrate. An empty spw selects the spectral windows that hold data
+        applymode :
+            applycal's applymode
+
+        Raises
+        ------
+        ValueError
+            If ms doesn't hold the tables' antennas and times, or a table solved per spectral
+            window has no solutions at a selected spectral window's frequencies
+        """
+        application = apply_to(self.stack, os.path.abspath(ms), selection, applymode)
+        return dataclasses.replace(self, applications=self.applications + (application, ))
 
     @property
     def accepted_rounds(self) -> Tuple[RoundRecord, ...]:
@@ -134,8 +193,16 @@ class SelfcalResult:
                 entry["beam"] = list(record.beam)
             if record.data_flagged is not None:
                 entry["data_flagged"] = list(record.data_flagged)
-            if record.predicted_snr is not None:
-                entry["predicted_snr"] = record.predicted_snr
+            for name in ("predicted_snr", "rms_in_mask", "thermal_noise", "noise_over_sigma"):
+                if getattr(record, name) is not None:
+                    entry[name] = getattr(record, name)
+            if record.findings:
+                entry["findings"] = list(record.findings)
+            if record.gains is not None:
+                entry["gains"] = {
+                    name: list(value) if isinstance(value, tuple) else value
+                    for name, value in dataclasses.asdict(record.gains).items() if value is not None
+                }
             rounds.append(entry)
         data = {
             "ms": relative(self.ms),
@@ -144,6 +211,16 @@ class SelfcalResult:
         }
         if self.provenance:
             data["provenance"] = dict(self.provenance)
+        if self.applications:
+            data["applications"] = [
+                {
+                    "ms": relative(application.ms),
+                    "selection": dataclasses.asdict(application.selection),
+                    "applymode": application.applymode,
+                    "fingerprint": application.fingerprint,
+                    "stack": application.stack.to_dict(relative_to=base),
+                } for application in self.applications
+            ]
         with open(path, "wb") as file:
             tomli_w.dump(data, file)
 
@@ -167,9 +244,16 @@ class SelfcalResult:
                 }
             ) for entry in data.get("rounds", [])
         ]
+        applications = [
+            Application(
+                absolute(entry["ms"]), Selection(**entry["selection"]), entry["applymode"],
+                CalStack.from_dict(entry["stack"], relative_to=base), entry.get("fingerprint", "")
+            ) for entry in data.get("applications", [])
+        ]
         return cls(
             absolute(data["ms"]),
             CalStack.from_dict(data["stack"], relative_to=base),
             rounds,
             data.get("provenance", {}),
+            applications,
         )

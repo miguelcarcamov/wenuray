@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import numpy as np
-from astropy.stats import sigma_clipped_stats
+from astropy.stats import mad_std, sigma_clipped_stats
+
+# Fewer pixels than this inside the source mask give no useful noise estimate there
+MIN_PIXELS_IN_MASK = 25
 
 
 @dataclass(frozen=True)
@@ -27,11 +30,15 @@ class ImageStatistics:
         Total flux of the model image, in Jy. A drop flags flux absorbed by amplitude gains
     beam :
         Restoring beam (major, minor) in arcsec and position angle in degrees, if known
+    rms_in_mask :
+        Noise of the residual image inside the source mask, in Jy/beam, if there is a mask. Below
+        the thermal noise, the model and the gains are fitting noise there (#119)
     """
     peak: float
     rms: float
     model_flux: float
     beam: Optional[Tuple[float, float, float]] = None
+    rms_in_mask: Optional[float] = None
 
     def __post_init__(self):
         if not self.rms > 0:
@@ -61,7 +68,8 @@ class ImageStatistics:
     ) -> ImageStatistics:
         """
         Computes the statistics from the image arrays. NaN pixels (e.g. outside the primary beam)
-        are ignored.
+        are ignored. Noise is the MAD standard deviation: image noise is correlated by the beam and
+        isn't Gaussian, so a plain standard deviation follows the outliers.
 
         Parameters
         ----------
@@ -81,8 +89,15 @@ class ImageStatistics:
         """
         residual = np.asarray(residual, dtype=float)
         excluded = ~np.isfinite(residual)
+        rms_in_mask = None
         if source_mask is not None:
-            excluded |= np.broadcast_to(np.asarray(source_mask, dtype=bool), residual.shape)
+            source = np.broadcast_to(np.asarray(source_mask, dtype=bool), residual.shape)
+            inside = residual[source & np.isfinite(residual)]
+            # The residual left where the model is fitted; not clipped, since that is what is
+            # measured
+            if inside.size >= MIN_PIXELS_IN_MASK:
+                rms_in_mask = float(mad_std(inside))
+            excluded |= source
         if excluded.all():
             raise ValueError("The residual image has no finite noise outside the source mask")
         _, _, rms = sigma_clipped_stats(
@@ -94,5 +109,6 @@ class ImageStatistics:
             peak=float(np.nanmax(restored)),
             rms=float(rms),
             model_flux=float(np.nansum(model)),
-            beam=beam
+            beam=beam,
+            rms_in_mask=rms_in_mask
         )

@@ -32,6 +32,32 @@
   visibility, times √(N_ant − 1) · √(n_int · n_chan · n_pol). It warns when the prediction is
   below `minsnr`, giving the shortest solint that would reach it, and records it as
   `predicted_snr`.
+- **Amplitudes and the source's spectrum.** An amplitude step that solves per spectral window
+  against a model without a spectrum lets each window's gain take up the source's flux at that
+  frequency: the residual drops, but the calibrated data lose their spectral index. A spectral
+  index α changes the amplitude by about α times the fractional bandwidth, so Wenuray warns when
+  the solutions are precise enough (1 / S/N below the fractional bandwidth) to absorb α = 1. Give
+  the imager a spectral model (tclean's `deconvolver="mtmfs"`, Pyralysis's `spectral_index`) or
+  solve with `combine="spw"`.
+- **The noise floor.** After the initial image, Wenuray estimates the image's thermal noise from
+  the data: the noise of one visibility, from differences of consecutive integrations, averaged
+  down by the data weights (σ · √Σw² / Σw). It is exact for natural weighting and a floor for
+  briggs or uniform. Each round logs and records its residual noise against it (`thermal_noise`,
+  and `rms_in_mask` inside the source mask). A residual inside the mask below 0.9× thermal is
+  warned about: the model and the gains are fitting noise there. Image noise is always the MAD
+  standard deviation, since it is correlated by the beam and isn't Gaussian.
+- **The weights.** From the same differences, Wenuray compares each baseline and spectral window's
+  measured noise with the noise its `SIGMA` states, and warns when the weights misstate it by more
+  than 10% (the median over baselines), or when a baseline stands out. The initial round records
+  the median as `noise_over_sigma`. `statwt` or Pyralysis's `EmpiricalWeightEstimator` can
+  re-estimate the weights (#124).
+- **What the gains say.** Each solved round records diagnostics of its gain table (`gains`): its
+  phase (and amplitude) corrections against the noise of the solutions, from the table's SNR
+  column. Each table is the increment over the accepted stack, so a ratio falling towards 1 means
+  the run is converging: the round corrected little beyond noise. It also names the antennas whose
+  phases scatter more than their distance from the array centre predicts (atmospheric phase grows
+  with baseline length), and, for gaintype `G`, compares X with Y: an X−Y phase ratio near 1 says
+  `T` would do. `RoundMetrics.gains` holds them for acceptance policies of your own.
 - **A round is kept only if it improves the image.** By default the PSNR must rise and every
   solution interval must keep enough antennas (3 for phases, 4 for amplitudes), and amplitude
   rounds must not lose model flux. A rejected round is rolled back and stops the run.
@@ -39,6 +65,35 @@
   start from tables of your own with `initial_stack=CalStack([CalTable("pcal", "p")])`.
 - **`result.final`** is the last accepted round; every round's metrics, decision and reasons are in
   `result.rounds` and in `<output>/selfcal.toml`.
+
+## Calibrating other data
+
+Self-calibration usually runs on the continuum; the accepted tables then go to the line data,
+other spectral windows, or another measurement set of the same observation. List them in the run:
+
+```toml
+[[apply.targets]]
+ms = "line.ms"            # relative to the recipe
+selection = { spw = "" }  # the spectral windows that hold data
+```
+
+or, in Python, `ApplyOptions(targets=(ApplyTarget("line.ms"), ))`. When the run ends, each target
+gets the accepted stack with the run's `applymode`. After a run, `result.apply_to("line.ms")` or
+`wenuray apply target_selfcal --ms line.ms` does the same. Each application is recorded in
+`selfcal.toml` (`[[applications]]`: the target, its selection, the tables with their spwmaps, and a
+fingerprint of the target).
+
+A split measurement set renumbers its spectral windows, so they are matched to the tables' by
+frequency, never by id:
+
+- a table solved with `combine="spw"` holds one solution for the band, which every target spectral
+  window takes;
+- a table solved per spectral window calibrates a target spectral window from the solved one that
+  overlaps it in frequency. If none does, Wenuray raises an error naming the nearest one: per-window
+  gains at another frequency would be a guess. Solve with `combine="spw"` to calibrate other
+  frequencies.
+
+The target must hold the tables' antennas, by the same ids, and overlap their times.
 
 ## Recipes
 
@@ -100,7 +155,8 @@ reruns it on a fresh copy of the input. A run Wenuray can't write as a recipe, e
 
 ### Configuration (`wenuray.config`)
 
-Frozen objects with CASA's parameter names: `Selection`, `SolveOptions`, `ApplyOptions`,
+Frozen objects with CASA's parameter names: `Selection`, `SolveOptions`, `ApplyOptions` (with its
+`ApplyTarget`s),
 `ImageGeometry` and `Weighting` (natural by default).
 
 ### Imaging (`wenuray.imaging`)

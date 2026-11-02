@@ -17,7 +17,7 @@ from .caltable import CalTable
 if TYPE_CHECKING:
     from .loop import Selfcal
     from .result import RoundRecord, SelfcalResult
-    from .steps import CalibrationStep
+    from .steps import CalibrationStep, Finding
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,11 @@ class SelfcalObserver:
     def on_round(self, record: RoundRecord) -> None:
         """
         After a round was imaged and judged (index 0 is the initial image)
+        """
+
+    def on_finding(self, finding: Finding) -> None:
+        """
+        When an advisory found something (#141); the loop logs it and records it with its round
         """
 
     def on_finished(self, result: SelfcalResult) -> None:
@@ -71,6 +76,28 @@ class LoggingObserver(SelfcalObserver):
             record.peak * 1e3, record.rms * 1e3, record.model_flux, 100 * record.flagged_fraction,
             "accepted" if record.accepted else "rejected", "; ".join(record.reasons)
         )
+        if record.gains is not None:
+            gains = record.gains
+            details = ["phase {0:.1f}".format(gains.phase_over_noise)]
+            if gains.amplitude_over_noise is not None:
+                details.append("amplitude {0:.1f}".format(gains.amplitude_over_noise))
+            if gains.xy_phase_over_noise is not None:
+                details.append("X-Y phase {0:.1f}".format(gains.xy_phase_over_noise))
+            if gains.xy_amplitude is not None:
+                details.append("X/Y amplitude {0:.1%} from 1".format(gains.xy_amplitude))
+            logger.info(
+                "Round %d solutions over noise: %s%s", record.index, ", ".join(details),
+                "; outlying antennas: " +
+                ", ".join(gains.outlying_antennas) if gains.outlying_antennas else ""
+            )
+        if record.thermal_noise:
+            logger.info(
+                "Round %d rms / thermal noise: %.2f%s", record.index,
+                record.rms / record.thermal_noise,
+                "" if record.rms_in_mask is None else ", inside the source mask: {0:.2f}".format(
+                    record.rms_in_mask / record.thermal_noise
+                )
+            )
 
     def on_finished(self, result: SelfcalResult) -> None:
         logger.info(

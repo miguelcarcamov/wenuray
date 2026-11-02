@@ -26,11 +26,12 @@ from __future__ import annotations
 import logging
 import os
 import platform
+from statistics import median
 from datetime import datetime, timezone
 from importlib import metadata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Mapping, Optional, Sequence, Tuple, Union
+from typing import Iterator, List, Mapping, Optional, Sequence, Tuple, Union
 
 import tomli_w
 from casatasks import applycal, gaincal
@@ -44,13 +45,15 @@ from ..utils.selfcal_utils import (
     solution_summary
 )
 from . import preflight
+from .advisories import ADVISORIES, RoundContext, SolveContext, StartContext
 from .acceptance import AcceptancePolicy, RoundMetrics
 from .flagging import NoFlagging
 from .caltable import CalStack, CalTable, derive_spwmap
 from .observers import LoggingObserver, SelfcalObserver
+from .diagnostics import gain_diagnostics
 from .result import RoundRecord, SelfcalResult
 from .schedule import ScheduleError, validate_schedule
-from .steps import CalibrationStep
+from .steps import CalibrationStep, Severity
 from .workspace import MSWorkspace
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,56 @@ def as_result(result: SelfcalResult) -> SelfcalResult:
 def _(result: Union[str, os.PathLike]) -> SelfcalResult:
     path = Path(result)
     return SelfcalResult.from_toml(str(path / RESULT_FILE if path.is_dir() else path))
+
+
+@dataclass
+class _RunState:
+    """
+    What a run has accepted so far, from round 0 on; one per Selfcal.run()
+
+    Parameters
+    ----------
+    workspace :
+        The measurement set's flag snapshots and calibration
+    base :
+        The run's imager, its grid resolved from the data; steps override it
+    stack :
+        The accepted tables
+    accepted :
+        The metrics of the last accepted round, which the next round is judged against
+    accepted_imager, accepted_name :
+        The imager and the image name of the last accepted round, whose model MODEL_DATA holds
+    thermal :
+        The image's thermal noise from the data (#119), if it could be estimated
+    rounds :
+        The records of every round so far
+    snapshots :
+        The flag versions saved, one per accepted round
+    """
+    workspace: MSWorkspace
+    base: Imager
+    stack: CalStack
+    accepted: RoundMetrics
+    accepted_imager: Imager
+    accepted_name: str
+    thermal: Optional[float]
+    rounds: List[RoundRecord] = field(default_factory=list)
+    snapshots: List[str] = field(default_factory=list)
+
+    def accept(self, name: str, table: CalTable, metrics: RoundMetrics, imager: Imager) -> None:
+        """
+        Keeps the round: its table joins the stack and its flags are saved
+        """
+        self.stack = self.stack.push(table)
+        self.workspace.snapshot(name)
+        self.snapshots.append(name)
+        self.accepted, self.accepted_imager, self.accepted_name = metrics, imager, name
+
+    def roll_back(self) -> None:
+        """
+        Puts the flags and the calibration of the last accepted round back
+        """
+        self.workspace.restore(self.snapshots[-1], self.stack)
 
 
 @dataclass(frozen=True)
@@ -205,6 +258,8 @@ class Selfcal:
                 table[name] = fields[name]
         if len(self.initial_stack):
             table["initial_stack"] = self.initial_stack.to_dict(relative_to=relative_to)
+        for target in table.get("apply", {}).get("targets", []):
+            target["ms"] = path(target["ms"])
         return table
 
     def to_toml(self, path: Union[str, os.PathLike]) -> None:
@@ -255,60 +310,110 @@ class Selfcal:
             observer.on_start(self)
         os.makedirs(self.output, exist_ok=True)
         provenance = self._provenance()
-        workspace = MSWorkspace(self.ms, self.selection, self.apply)
-        self._reset_corrected(workspace)
-        stack = self.initial_stack
-
-        result = self._image(self.imager, "round0")
-        accepted = RoundMetrics(result.statistics())
-        rounds = [self._record(0, None, "", result, accepted, True, ("initial image", ))]
-        _notify(observers, "on_round", rounds[-1])
-        workspace.snapshot("round0")
-        snapshots = ["round0"]
-        accepted_imager, accepted_name = self.imager, "round0"
-
-        for index, step in enumerate(self.steps, start=1):
-            name = "round{0}".format(index)
-            imager = self.imager.with_overrides(**step.imaging)
-            predicted = self._predict_snr(step)
-            table = self._solve(step, stack, name)
-            if table is None:
-                # Nothing was applied or imaged, so there is nothing to restore
-                rounds.append(
-                    self._failed_record(index, step, "gaincal found no solutions", predicted)
-                )
-                _notify(observers, "on_round", rounds[-1])
+        # An "auto" grid is derived once, from the data, and kept for every round (#67)
+        base = self.imager.resolved(ImagingRequest(self.ms, self.output, self.selection))
+        if base is not self.imager:
+            provenance["geometry"] = {
+                "imsize": list(base.geometry.imsize),
+                "cell": base.geometry.cell
+            }
+        state = self._start(base, observers)
+        for index, step in enumerate(self._rounds(state), start=1):
+            if not self._run_round(index, step, state, observers).accepted:
                 break
-            _notify(observers, "on_solved", step, table)
-            self._apply(stack, table)
-            # Residuals against the model the gains were solved with; restored if rejected
-            data_flagged = step.flagging.flag(self.ms, self.selection)
-            result = self._image(imager, name)
-            flagged, antennas = solution_summary(table.path)
-            current = RoundMetrics(result.statistics(), step, flagged, antennas)
-            decision = step.acceptance_policy(self.acceptance).decide(accepted, current)
-            rounds.append(
-                self._record(
-                    index, step, table.path, result, current, decision.accepted, decision.reasons,
-                    data_flagged, predicted
-                )
-            )
-            _notify(observers, "on_round", rounds[-1])
-            if not decision.accepted:
-                workspace.restore(snapshots[-1], stack)
-                # MODEL_DATA must hold the accepted model again
-                self._image(accepted_imager, accepted_name + "_model")
-                break
-            stack = stack.push(table)
-            workspace.snapshot(name)
-            snapshots.append(name)
-            accepted, accepted_imager, accepted_name = current, imager, name
+        state.workspace.discard(*state.snapshots)
 
-        workspace.discard(*snapshots)
-        selfcal_result = SelfcalResult(self.ms, stack, rounds, provenance)
+        selfcal_result = SelfcalResult(self.ms, state.stack, state.rounds, provenance)
         selfcal_result.to_toml(record_path)
+        # Other data calibrated with the accepted stack (#68); the record is rewritten after each,
+        # so a failing target leaves the run and the earlier applications recorded
+        for target in self.apply.targets:
+            selfcal_result = selfcal_result.apply_to(
+                target.ms, target.selection, self.apply.applymode
+            )
+            selfcal_result.to_toml(record_path)
         _notify(observers, "on_finished", selfcal_result)
         return selfcal_result
+
+    def _start(self, base: Imager, observers: Sequence[SelfcalObserver]) -> _RunState:
+        """
+        Round 0: CORRECTED_DATA set to DATA calibrated with the initial stack, the initial image,
+        and the checks of the data that hold for the whole run
+        """
+        workspace = MSWorkspace(self.ms, self.selection, self.apply)
+        self._reset_corrected(workspace)
+        result = self._image(base, "round0")
+        thermal, noise_over_sigma, findings = self._check_data(observers)
+        metrics = RoundMetrics(result.statistics())
+        record = replace(
+            self._record(0, None, "", result, metrics, True, ("initial image", ), thermal),
+            noise_over_sigma=noise_over_sigma,
+            findings=findings
+        )
+        state = _RunState(workspace, base, self.initial_stack, metrics, base, "round0", thermal)
+        state.rounds.append(record)
+        _notify(observers, "on_round", record)
+        workspace.snapshot("round0")
+        state.snapshots.append("round0")
+        return state
+
+    def _rounds(self, state: _RunState) -> Iterator[CalibrationStep]:
+        """
+        The steps to run, one round each. The schedule is consumed one round at a time, so an
+        entry can decide its next round from the state (#66)
+        """
+        yield from self.steps
+
+    def _run_round(
+        self, index: int, step: CalibrationStep, state: _RunState,
+        observers: Sequence[SelfcalObserver]
+    ) -> RoundRecord:
+        """
+        One round: solve against DATA with the accepted stack pre-applied, apply, flag, image,
+        judge, then keep the round or roll it back. Returns its record
+        """
+        name = "round{0}".format(index)
+        imager = state.base.with_overrides(**step.imaging)
+        predicted, findings = self._predict_snr(step, state.accepted_imager, observers)
+        table = self._solve(step, state.stack, name)
+        if table is None:
+            # Nothing was applied or imaged, so there is nothing to restore
+            record = replace(
+                self._failed_record(index, step, "gaincal found no solutions", predicted),
+                findings=findings
+            )
+            state.rounds.append(record)
+            _notify(observers, "on_round", record)
+            return record
+        _notify(observers, "on_solved", step, table)
+        self._apply(state.stack, table)
+        # Residuals against the model the gains were solved with; restored if rejected
+        data_flagged = step.flagging.flag(self.ms, self.selection)
+        result = self._image(imager, name)
+        flagged, antennas = solution_summary(table.path)
+        current = RoundMetrics(
+            result.statistics(),
+            step,
+            flagged,
+            antennas,
+            gains=gain_diagnostics(table.path, step.solves_amplitude)
+        )
+        decision = step.acceptance_policy(self.acceptance).decide(state.accepted, current)
+        record = self._record(
+            index, step, table.path, result, current, decision.accepted, decision.reasons,
+            state.thermal, data_flagged, predicted
+        )
+        findings += self._advise("after_round", RoundContext(record), observers)
+        record = replace(record, findings=findings)
+        state.rounds.append(record)
+        _notify(observers, "on_round", record)
+        if decision.accepted:
+            state.accept(name, table, current, imager)
+        else:
+            state.roll_back()
+            # MODEL_DATA must hold the accepted model again
+            self._image(state.accepted_imager, state.accepted_name + "_model")
+        return record
 
     def _provenance(self) -> dict:
         """
@@ -369,23 +474,57 @@ class Selfcal:
             ImagingRequest(self.ms, os.path.join(self.output, name), self.selection)
         )
 
-    def _predict_snr(self, step: CalibrationStep) -> Optional[float]:
+    def _check_data(
+        self, observers: Sequence[SelfcalObserver]
+    ) -> Tuple[Optional[float], Optional[float], Tuple[str, ...]]:
+        """
+        Once per run, after the initial image: the image's thermal noise from the data (#119), the
+        median of measured noise over SIGMA (#129), and the run-wide advisories' findings. None
+        for what the data can't support
+        """
+        sample = preflight.read_sample(self.ms, self.selection)
+        findings = self._advise("at_start", StartContext(self.ms, sample), observers)
+        if sample is None:
+            logger.debug("No thermal noise estimate for %s", self.ms)
+            return None, None, findings
+        logger.info(
+            "Thermal noise from the data: %.3g mJy/beam (natural weighting; a floor for others)",
+            sample.thermal_noise * 1e3
+        )
+        ratios = [ratio for *_, ratio in sample.noise_over_sigma]
+        return sample.thermal_noise, float(median(ratios)) if ratios else None, findings
+
+    def _predict_snr(
+        self, step: CalibrationStep, model_imager: Imager, observers: Sequence[SelfcalObserver]
+    ) -> Tuple[Optional[float], Tuple[str, ...]]:
         """
         The step's solution S/N predicted from the data, against the accepted model in
-        MODEL_DATA; warns when it is below minsnr. None if the data can't support an estimate
+        MODEL_DATA, which model_imager made, and the advisories' findings before its solve. None
+        if the data can't support an estimate
         """
         sample = preflight.read_sample(self.ms, self.selection)
         if sample is None:
             logger.debug("No solution S/N estimate for %s", _describe(step))
-            return None
+            return None, ()
         prediction = preflight.predict(sample, step, self.solve)
-        if not prediction.enough:
-            logger.warning(
-                "%s: predicted solution S/N %.1f is below minsnr %g, so gaincal may flag most "
-                "solutions; %s", _describe(step), prediction.snr, prediction.minsnr,
-                prediction.advice
-            )
-        return prediction.snr
+        context = SolveContext(step, _describe(step), self.solve, sample, prediction, model_imager)
+        return prediction.snr, self._advise("before_solve", context, observers)
+
+    @staticmethod
+    def _advise(hook: str, context: object,
+                observers: Sequence[SelfcalObserver]) -> Tuple[str, ...]:
+        """
+        Runs one hook of every advisory: each finding is logged, sent to the observers and
+        returned for the round's record
+        """
+        findings = []
+        for advisory in ADVISORIES:
+            for finding in getattr(advisory, hook)(context):
+                level = logging.ERROR if finding.severity is Severity.ERROR else logging.WARNING
+                logger.log(level, "%s", finding.message)
+                _notify(observers, "on_finding", finding)
+                findings.append(finding.message)
+        return tuple(findings)
 
     def _solve(self, step: CalibrationStep, stack: CalStack, name: str) -> Optional[CalTable]:
         """
@@ -429,6 +568,7 @@ class Selfcal:
         metrics: RoundMetrics,
         accepted: bool,
         reasons: Sequence[str],
+        thermal_noise: Optional[float],
         data_flagged: Optional[Tuple[float, float]] = None,
         predicted_snr: Optional[float] = None
     ) -> RoundRecord:
@@ -448,6 +588,9 @@ class Selfcal:
             reasons=tuple(reasons),
             data_flagged=data_flagged,
             predicted_snr=predicted_snr,
+            rms_in_mask=statistics.rms_in_mask,
+            gains=metrics.gains,
+            thermal_noise=thermal_noise,
         )
 
     @staticmethod

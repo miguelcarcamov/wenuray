@@ -141,6 +141,24 @@ def test_the_solution_snr_sample_reads_the_simulated_noise(tmp_path):
     assert (sample.nantennas, sample.interval, sample.channels, sample.parallel_hands) == \
         (8, 60.0, (1, ), 2)
     assert sample.span == pytest.approx(7200.0, abs=60.0)
+    assert sample.band == pytest.approx((5.0e9 - 64e6, 5.0e9 + 64e6))  # one 128 MHz channel
+
+
+def test_the_thermal_noise_is_the_noise_of_a_naturally_weighted_residual(tmp_path):
+    """
+    The thermal noise predicted from the data matches the MAD std of tclean's residual of the
+    same data, with natural weighting (#119)
+    """
+    from wenuray.imaging.contract import ImagingRequest
+    from wenuray.selfcalibration.preflight import read_sample
+    from wenuray.config import Selection
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+    result = IMAGER.image(ImagingRequest(ms, str(tmp_path / "model")))
+
+    thermal = read_sample(ms, Selection()).thermal_noise
+
+    assert result.statistics().rms == pytest.approx(thermal, rel=0.15)
 
 
 def test_each_round_records_its_predicted_snr(accepted):
@@ -185,3 +203,127 @@ def test_the_fingerprint_changes_with_the_data(tmp_path):
         tb.close()
 
     assert ms_fingerprint(ms) != before
+
+
+@pytest.mark.parametrize("sigma, expected", [(0.05, 1.0), (0.05 / np.sqrt(2), np.sqrt(2))])
+def test_the_noise_over_sigma_measures_how_wrong_the_weights_are(tmp_path, sigma, expected):
+    """0.05 Jy noise per part of each visibility; SIGMA set right, then sqrt(2) too small (#129)"""
+    from casatools import table
+    from wenuray.config import Selection
+    from wenuray.imaging.contract import ImagingRequest
+    from wenuray.selfcalibration.preflight import read_sample, weight_anomalies
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+    tool = table()
+    tool.open(ms, nomodify=False)
+    try:
+        tool.putcol("SIGMA", np.full_like(tool.getcol("SIGMA"), sigma))
+    finally:
+        tool.close()
+    tool.done()
+    IMAGER.image(ImagingRequest(ms, str(tmp_path / "model")))
+
+    sample = read_sample(ms, Selection())
+
+    ratios = [ratio for *_, ratio in sample.noise_over_sigma]
+    assert len(ratios) == 28  # every baseline of the 8 antennas
+    assert np.median(ratios) == pytest.approx(expected, rel=0.05)
+    assert bool(weight_anomalies(sample)) == bool(expected > 1.1)
+
+
+def test_an_auto_grid_is_derived_from_the_data(tmp_path):
+    """
+    The simulated data reach 59.1 klambda (a 1.745 arcsec Nyquist cell) with 25 m dishes at 4.936
+    to 5.064 GHz (#67)
+    """
+    from wenuray.config import ImageGeometry, Selection
+    from wenuray.imaging.contract import resolve_geometry
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+
+    grid = resolve_geometry(ImageGeometry(imsize="auto", cell="auto"), ms, Selection())
+
+    cell = float(grid.cell[:-len("arcsec")])
+    assert cell == pytest.approx(1.745 / 2.5, rel=0.01)
+    fwhm = np.degrees(1.02 * 299792458.0 / 4.936e9 / 25.0) * 3600
+    needed = 2.5 * fwhm / cell
+    assert grid.imsize[0] == grid.imsize[1]
+    assert needed <= grid.imsize[0] < 1.1 * needed
+
+
+def test_a_run_with_an_auto_grid_records_it(tmp_path):
+    from wenuray.config import ImageGeometry
+    from wenuray.selfcalibration.loop import Selfcal
+    from wenuray.selfcalibration.steps import Phasecal
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"))
+    # A small field keeps the test fast: a tenth of the primary beam
+    imager = Tclean(
+        ImageGeometry(imsize="auto", cell="auto", field_of_view=0.25), niter=200, nsigma=3.0
+    )
+
+    result = Selfcal(ms, imager, [Phasecal("inf")], solve=SolveOptions(refant="A0")).run()
+
+    cell = result.provenance["geometry"]["cell"]
+    assert float(cell[:-len("arcsec")]) == pytest.approx(1.745 / 2.5, rel=0.01)
+    assert result.rounds[1].accepted
+
+
+@pytest.mark.parametrize("gaintype, calmode", [("T", "p"), ("T", "ap"), ("G", "ap"), ("G", "p")])
+def test_gain_diagnostics_read_one_at_the_noise(tmp_path, gaintype, calmode):
+    """
+    Solutions against the true model of data without gain errors are pure noise: every ratio of
+    scatter to noise reads about 1, whatever the gaintype and calmode (#126). This pins how CASA's
+    SNR column relates to the noise of the solutions
+    """
+    from casatasks import clearcal, gaincal
+    from wenuray.selfcalibration.diagnostics import gain_diagnostics
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"), phase_errors_in=())
+    clearcal(vis=ms, addmodel=True)
+    tool = table()
+    tool.open(ms, nomodify=False)
+    try:
+        tool.putcol("MODEL_DATA", np.ones_like(tool.getcol("MODEL_DATA")))  # the 1 Jy source
+    finally:
+        tool.close()
+    tool.done()
+    caltable = str(tmp_path / "noise.cal")
+    gaincal(
+        vis=ms,
+        caltable=caltable,
+        solint="int",
+        refant="A0",
+        minblperant=3,
+        gaintype=gaintype,
+        calmode=calmode
+    )
+
+    diagnostics = gain_diagnostics(caltable, solves_amplitude="a" in calmode)
+
+    ratios = [diagnostics.phase_over_noise]
+    ratios += [diagnostics.amplitude_over_noise] if "a" in calmode else []
+    ratios += [diagnostics.xy_phase_over_noise] if gaintype == "G" else []
+    assert all(0.8 < ratio < 1.2 for ratio in ratios), ratios
+
+
+def test_gain_diagnostics_fall_as_the_run_converges(tmp_path):
+    """
+    The first round corrects the injected phase errors, far above the noise; the second, against
+    the improved model, corrects less (#126)
+    """
+    from wenuray.selfcalibration.loop import Selfcal
+    from wenuray.selfcalibration.steps import Phasecal
+
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"))
+
+    result = Selfcal(
+        ms,
+        IMAGER, [Phasecal("int"), Phasecal("int")],
+        solve=SolveOptions(refant="A0", minblperant=3)
+    ).run()
+
+    first, second = result.rounds[1].gains, result.rounds[2].gains
+    assert first.phase_over_noise > 3
+    assert second.phase_over_noise < first.phase_over_noise
+    assert first.amplitude_over_noise is None  # phase-only

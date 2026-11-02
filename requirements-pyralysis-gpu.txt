@@ -1,0 +1,23 @@
+# What the :gpu image adds to Pyralysis's environment (requirements-pyralysis.txt, #148): CUDA 12
+# through CuPy and numba-cuda, with the CUDA libraries as NVIDIA's pip wheels, so the image needs no
+# nvidia/cuda base and the host only its driver (>= 525; run with `docker run --gpus all`).
+# The whole toolkit CuPy's [ctk] extra pulls is kept: Pyralysis uses cupy.fft (cuFFT) and NVRTC
+# kernels, and NumPy calls on dask arrays of CuPy chunks (einsum, tensordot, linalg) dispatch to
+# cuBLAS and cuSOLVER. Regenerate: on top of requirements-pyralysis.txt,
+#   pip install "cupy-cuda12x[ctk]>=13.2,<15" "numba-cuda[cu12]"   and keep the new pins.
+cuda-bindings==12.9.10
+cuda-core==1.2.2
+cuda-pathfinder==1.8.5
+cuda-toolkit==12.9.2.0
+cupy-cuda12x==14.2.0
+numba-cuda==0.30.4
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cuda-cccl-cu12==12.9.27
+nvidia-cuda-nvcc-cu12==12.9.86
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cuda-runtime-cu12==12.9.79
+nvidia-cufft-cu12==11.4.1.4
+nvidia-curand-cu12==10.3.10.19
+nvidia-cusolver-cu12==11.7.5.82
+nvidia-cusparse-cu12==12.5.10.65
+nvidia-nvjitlink-cu12==12.9.86

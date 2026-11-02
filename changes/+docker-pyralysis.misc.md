@@ -1,0 +1,1 @@
+Docker images with Pyralysis (#148): `:latest` runs it on CPU, the new `:gpu` on CUDA 12 (CuPy and numba-cuda, with NVIDIA's pip wheels; `docker run --gpus all`). Pyralysis lives in its own environment, `/opt/pyralysis` (`requirements-pyralysis.txt`), as its pins conflict with Wenuray's.

@@ -123,6 +123,13 @@ class Tclean(Imager):
     def from_recipe(cls, table: Mapping) -> Tclean:
         return cls(**recipe.decode_configs(table, geometry=ImageGeometry, weighting=Weighting))
 
+    @property
+    def models_spectrum(self) -> bool:
+        # Multi-term deconvolution (nterms defaults to 2) or a cube; mfs with one term is flat
+        if self.options.get("specmode", "mfs") != "mfs":
+            return True
+        return self.options.get("deconvolver") == "mtmfs" and self.options.get("nterms", 2) > 1
+
     def _image_suffix(self) -> str:
         # Multi-term deconvolution writes one image per Taylor term; the zeroth is the intensity
         return ".tt0" if self.options.get("deconvolver") == "mtmfs" else ""

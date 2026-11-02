@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import Mapping, Tuple, Union
 
 # applycal applymode values
+# A grid value derived from the data (#67)
+AUTO = "auto"
 APPLY_MODES = ("calflag", "calflagstrict", "trial", "flagonly", "flagonlystrict", "calonly")
 # tclean weighting values
 WEIGHTINGS = (
@@ -108,6 +110,33 @@ class SolveOptions:
 
 
 @dataclass(frozen=True)
+class ApplyTarget:
+    """
+    Other data the accepted calibration is applied to after the run (#68), e.g. the line data
+
+    Parameters
+    ----------
+    ms :
+        Measurement set of the same observation: the run's own for other spectral windows, or
+        another one, e.g. split with other spectral windows. Its spectral windows are matched to
+        the tables' by frequency
+    selection :
+        The data to calibrate. An empty spw selects the spectral windows that hold data
+    """
+    ms: str
+    selection: Selection = Selection()
+
+    def __post_init__(self):
+        _require_str(self, "ms")
+        if not self.ms:
+            raise ValueError("An apply target needs a measurement set")
+        if isinstance(self.selection, Mapping):
+            object.__setattr__(self, "selection", Selection(**self.selection))
+        if not isinstance(self.selection, Selection):
+            raise TypeError("selection must be a Selection, not {0!r}".format(self.selection))
+
+
+@dataclass(frozen=True)
 class ApplyOptions:
     """
     applycal options. Each accepted table records the interpolation it is applied with.
@@ -118,12 +147,24 @@ class ApplyOptions:
         "calflag" also flags the data whose solutions failed minsnr
     interp :
         Temporal interpolation of the solutions, e.g. "linear" or "nearest"
+    targets :
+        Other data the accepted calibration is applied to when the run ends, with applymode (#68)
     """
     applymode: str = "calflag"
     interp: str = "linear"
+    targets: Tuple[ApplyTarget, ...] = ()
 
     def __post_init__(self):
         _require_str(self, "applymode", "interp")
+        object.__setattr__(
+            self, "targets",
+            tuple(
+                ApplyTarget(**target) if isinstance(target, Mapping) else target
+                for target in self.targets
+            )
+        )
+        if not all(isinstance(target, ApplyTarget) for target in self.targets):
+            raise TypeError("targets must be ApplyTargets, not {0!r}".format(self.targets))
         if self.applymode not in APPLY_MODES:
             raise ValueError(
                 "applymode must be one of {0}, not {1!r}".format(APPLY_MODES, self.applymode)
@@ -135,27 +176,42 @@ class ApplyOptions:
 @dataclass(frozen=True)
 class ImageGeometry:
     """
-    Image grid. The imsize and cell left unset can be derived from the data.
+    Image grid. The imsize and cell left unset can be derived from the data; "auto" derives them
+    when the run starts (#67).
 
     Parameters
     ----------
     imsize :
-        Number of pixels, (nx, ny), or a single number for a square image
+        Number of pixels, (nx, ny), or a single number for a square image. "auto": field_of_view
+        primary-beam FWHMs (1.02 lambda / D at the lowest selected frequency, with the smallest
+        dish), rounded up to a size FFTs handle well
     cell :
-        Pixel size, e.g. "0.05arcsec"
+        Pixel size, e.g. "0.05arcsec". "auto": the Nyquist cell of the selected data,
+        1 / (2 ``max(|u|, |v|)``) at the highest frequency, divided by oversampling
     phasecenter :
         Image center; empty for the phase center of the field
     stokes :
         Stokes planes to image
+    oversampling :
+        Pixels per Nyquist cell for cell="auto"; 2.5 gives about 5 pixels across the beam
+    field_of_view :
+        Primary-beam FWHMs the image spans for imsize="auto"; 2.5 reaches the first null of the
+        main lobe, so sources at its edge are modelled rather than aliased
     """
-    imsize: Union[int, Tuple[int, int], None] = None
+    imsize: Union[int, Tuple[int, int], str, None] = None
     cell: str = ""
     phasecenter: str = ""
     stokes: str = "I"
+    oversampling: float = 2.5
+    field_of_view: float = 2.5
 
     def __post_init__(self):
         _require_str(self, "cell", "phasecenter", "stokes")
-        if self.imsize is not None:
+        for name in ("oversampling", "field_of_view"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0:
+                raise ValueError("{0} must be a positive number, not {1!r}".format(name, value))
+        if self.imsize is not None and self.imsize != AUTO:
             if isinstance(self.imsize, int):
                 imsize = (self.imsize, self.imsize)
             else:
@@ -164,11 +220,17 @@ class ImageGeometry:
                 isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in imsize
             ):
                 raise ValueError(
-                    "imsize must be a positive integer or a pair of them, not {0!r}".format(
-                        self.imsize
-                    )
+                    "imsize must be a positive integer, a pair of them or \"auto\", not "
+                    "{0!r}".format(self.imsize)
                 )
             object.__setattr__(self, "imsize", imsize)
+
+    @property
+    def auto(self) -> bool:
+        """
+        Whether the cell or the image size is still to be derived from the data
+        """
+        return self.cell == AUTO or self.imsize == AUTO
 
 
 @dataclass(frozen=True)
