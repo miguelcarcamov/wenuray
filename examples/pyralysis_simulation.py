@@ -1,5 +1,5 @@
 """
-Simulated observations for Wenuray's examples (the tutorial), made with Pyralysis's
+Simulated observations for Wenuray's examples (the tutorial and the gallery), made with Pyralysis's
 simulation framework and its noise injectors, and written as measurement sets CASA reads.
 
 For each observation it writes, next to each other:
@@ -16,7 +16,7 @@ write(): pyralysis#405 (subtables), #406 (frequency frame) and #407 (FEED).
 """
 from dataclasses import dataclass
 from importlib import resources
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import astropy.units as u
 import numpy as np
@@ -44,13 +44,16 @@ class Observation:
     system_temperature :
         In K, for the radiometer equation
     phase_error, amplitude_error :
-        The antenna gain errors: degrees of phase and fractional amplitude, per integration
+        The antenna gain errors' rms: degrees of phase and fractional amplitude
     declination :
         Of the target, e.g. "-37d09m16s"; the right ascension is fixed
     seed :
         Of the gain errors (the thermal noise uses seed + 1)
     integration, duration :
         In seconds
+    coherence_time :
+        In seconds, how long the gain errors take to change (DriftingGainInjector); None draws
+        them anew for every integration (Pyralysis's AntennaGainInjector)
     """
     configuration: str
     frequency: float
@@ -62,6 +65,7 @@ class Observation:
     seed: int
     integration: float = 30.0
     duration: float = 7200.0
+    coherence_time: Optional[float] = None
 
     @property
     def path(self) -> str:
@@ -195,19 +199,61 @@ def observe(observation: Observation, sources: list):
     return context.dataset
 
 
+def drifting_gain_injector():
+    """
+    DriftingGainInjector, defined on first use, since its base class is Pyralysis's
+    """
+    from dataclasses import dataclass
+
+    from pyralysis.injectors import AntennaGainInjector
+
+    @dataclass
+    class DriftingGainInjector(AntennaGainInjector):
+        """
+        Antenna gains that drift smoothly in time, as the atmosphere's do, unlike
+        AntennaGainInjector's, which are drawn anew for every integration (pyralysis#409).
+
+        Each antenna's phase, and the logarithm of its amplitude, is a stationary Gaussian process
+        with a squared-exponential correlation of coherence_time seconds, made of random Fourier
+        features: sigma sqrt(2 / n) sum cos(omega_k t + phi_k), with omega_k ~ N(0, 1 / tau^2).
+        The gains are a function of the time alone, so every block of rows gets the same ones.
+        """
+        coherence_time: float = 300.0
+        features: int = 200
+
+        def _apply_gain_block(
+            self, vis_block, antenna1_block, antenna2_block, time_block, n_ant, n_freq, noise_model
+        ):
+            random = np.random.default_rng(self.seed)
+            shape = (2, n_ant, self.features)
+            omega = random.normal(0.0, 1.0 / self.coherence_time, shape)
+            offset = random.uniform(0.0, 2 * np.pi, shape)
+            times, at = np.unique(time_block, return_inverse=True)
+            process = np.sqrt(2.0 / self.features
+                              ) * np.cos(omega[..., None] * times + offset[..., None]).sum(axis=2)
+            gains = np.exp(self.amp_sigma * process[0] + 1j * self.phase_sigma * process[1])
+            product = gains[antenna1_block, at] * np.conj(gains[antenna2_block, at])
+            return (vis_block * product[:, None, None]).astype(vis_block.dtype)
+
+    return DriftingGainInjector
+
+
 def gain_errors(observation: Observation):
     """
-    Antenna-based gains, drawn anew for every integration (and channel; there is one): Pyralysis's
-    AntennaGainInjector draws them independently (pyralysis#409), so only solutions at every
-    integration can follow them
+    Antenna-based gains. With a coherence time, they drift smoothly (DriftingGainInjector);
+    without, Pyralysis's AntennaGainInjector draws them anew for every integration (and channel;
+    there is one), so only solutions at every integration can follow them
     """
     from pyralysis.injectors import AntennaGainInjector
 
-    return AntennaGainInjector(
+    options = dict(
         amp_sigma=observation.amplitude_error,
         phase_sigma=np.radians(observation.phase_error),
         seed=observation.seed
     )
+    if observation.coherence_time is None:
+        return AntennaGainInjector(**options)
+    return drifting_gain_injector()(coherence_time=observation.coherence_time, **options)
 
 
 def thermal_noise(observation: Observation):
