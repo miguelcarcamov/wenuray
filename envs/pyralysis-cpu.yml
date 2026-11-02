@@ -1,0 +1,22 @@
+# Pyralysis's environment for Wenuray, CPU only. Pyralysis's pins conflict with Wenuray's (#148), so
+# it lives in an environment of its own, which Wenuray's Pyralysis worker runs with. GPU files and
+# which one suits your card: envs/README.md.
+#
+# Create:  micromamba create -f envs/pyralysis-cpu.yml   (or conda/mamba env create -f ...)
+# Use:     export WENURAY_PYRALYSIS_PYTHON=$(micromamba run -n wenuray-pyralysis which python)
+#
+# Paths in the pip block are relative to this file.
+name: wenuray-pyralysis
+
+channels:
+- conda-forge
+
+dependencies:
+  # The interpreter and NumPy of requirements-pyralysis.txt's pins, so pip installs one NumPy only
+- python=3.12
+- numpy=2.3.5
+- pip
+- pip:
+  # ska-ost-array-config and the ska-* packages come from SKA's index
+  - --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
+  - -r ../requirements-pyralysis.txt

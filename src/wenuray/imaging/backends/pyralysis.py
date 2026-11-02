@@ -264,6 +264,19 @@ def _interpreter() -> str:
     return os.environ.get(PYTHON_SETTING) or sys.executable
 
 
+def _worker_environment(interpreter: str):
+    """
+    The worker's environment variables: this process's, and, when its Python is a conda
+    environment's (#155), CONDA_PREFIX set to that environment, as activating it would. CuPy finds
+    the CUDA libraries the environment installed (envs/pyralysis-cuda*.yml) through it; without it,
+    it may load a system CUDA's instead, built for other GPUs. None keeps this process's
+    """
+    prefix = os.path.dirname(os.path.dirname(os.path.abspath(interpreter)))
+    if not os.path.isdir(os.path.join(prefix, "conda-meta")):
+        return None
+    return {**os.environ, "CONDA_PREFIX": prefix}
+
+
 def _run(request: dict, cwd: str = None) -> dict:
     """
     Runs the worker with a request and returns its reply, raising its error
@@ -273,7 +286,12 @@ def _run(request: dict, cwd: str = None) -> dict:
     logger.debug("Running %s", " ".join(command))
     try:
         process = subprocess.run(
-            command, input=json.dumps(request), capture_output=True, text=True, cwd=cwd
+            command,
+            input=json.dumps(request),
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=_worker_environment(command[0])
         )
     except FileNotFoundError:
         raise ImportError(

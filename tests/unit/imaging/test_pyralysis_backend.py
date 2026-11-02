@@ -277,6 +277,24 @@ class TestWorkerEnvironment:
 
         assert worker.requests[-1].command[:2] == ["/opt/pyralysis/bin/python", "-P"]
 
+    def test_a_conda_environments_python_runs_as_if_activated(self, worker, monkeypatch, tmp_path):
+        """#155: CuPy finds the environment's CUDA through CONDA_PREFIX, not a system CUDA"""
+        (tmp_path / "conda-meta").mkdir()
+        monkeypatch.setenv(backend.PYTHON_SETTING, str(tmp_path / "bin" / "python"))
+        monkeypatch.setenv("CONDA_PREFIX", "/somewhere/else")
+
+        imager()
+
+        assert worker.requests[-1].env["CONDA_PREFIX"] == str(tmp_path)
+        assert worker.requests[-1].env["PATH"] == backend.os.environ["PATH"]
+
+    def test_another_python_keeps_this_environment(self, worker, monkeypatch, tmp_path):
+        monkeypatch.setenv(backend.PYTHON_SETTING, str(tmp_path / "bin" / "python"))
+
+        imager()
+
+        assert worker.requests[-1].env is None
+
     def test_a_python_that_does_not_exist_says_so(self, monkeypatch):
         monkeypatch.setenv(backend.PYTHON_SETTING, "/no/such/python")
 

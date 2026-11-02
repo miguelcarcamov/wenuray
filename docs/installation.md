@@ -59,6 +59,28 @@ conda activate wenuray-env
 The environment provides Python 3.12 and the pinned dependencies from `requirements.txt`; then
 install Wenuray itself with `pip install -e .` (from a clone) or `pip install wenuray`.
 
+### Pyralysis, on CPU or GPU
+
+Pyralysis's pins conflict with Wenuray's, so it gets an environment of its own, which Wenuray's
+Pyralysis imager runs in. [`envs/`](https://github.com/miguelcarcamov/wenuray/tree/development/envs)
+has one file for CPU and one for each CUDA line, since each CUDA release supports other GPUs:
+
+| File | GPUs |
+| --- | --- |
+| `pyralysis-cpu.yml` | none |
+| `pyralysis-cuda11.yml` | Kepler (Tesla K40, K80) |
+| `pyralysis-cuda12.yml` | Maxwell, Pascal, Volta (GTX 9xx and 10xx, P100, V100) |
+| `pyralysis-cuda13.yml` | Turing and newer (RTX 20xx and later, T4, A100, H100) |
+
+```bash
+micromamba create -f envs/pyralysis-cuda12.yml       # or conda env create -f ...
+export WENURAY_PYRALYSIS_PYTHON=$(micromamba run -n wenuray-pyralysis-cuda12 which python)
+```
+
+The CUDA environments bring the toolkit and CuPy from conda-forge, so the host needs only the NVIDIA
+driver. [`envs/README.md`](https://github.com/miguelcarcamov/wenuray/blob/development/envs/README.md)
+has each file's minimum driver and how to check your card.
+
 ## With Docker
 
 Two images, both with tclean and Pyralysis:
