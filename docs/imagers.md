@@ -45,6 +45,35 @@ Pyralysis's casacore and CASA's can't share one.
 the gain errors self-calibration should solve for.
 ```
 
+### Gridding
+
+Pyralysis fits χ² on the visibilities, row by row, but predicts each row's model visibility, and
+the χ² gradient, from an FFT of the model on a padded grid, interpolated at the row's (u, v). Its
+defaults, bilinear interpolation on a grid padded by 1.2, are off by a few percent of the peak
+around bright emission ([clirai/pyralysis#414](https://gitlab.com/clirai/pyralysis/-/work_items/414)),
+and a model fitted through them makes up for it. A convolution kernel tabulated finely, on a grid
+padded by 2, is within 0.06% of the exact transform (tclean's default is within 0.02%):
+
+```python
+Pyralysis(geometry, weighting, terms=[...], optimizer="lbfgsb",
+          estimator="degridding", ckernel="gaussian-sinc", ckernel_oversampling=8,
+          padding_factor=2.0)
+```
+
+Each iteration then costs more: the grid has about 2.8 times as many cells. Of the kernels
+Pyralysis's options build, all 3 cells wide, Gaussian-sinc is the most accurate; its prolate
+spheroidal (`pswf1`) needs 7 cells, as tclean's, which the options can't set yet.
+
+Pyralysis 3.3.0 grids the residual image, which gives the round's noise and peak S/N, at padding 1.2
+without a kernel whatever these options say, so it keeps a few percent of error around bright
+emission until Pyralysis grids it with them.
+
+Inside its mask, a model with a weak regularisation also fits the noise: the residual there falls
+below the thermal noise, which flatters the round's peak S/N. A stronger regularisation term, a
+tighter mask or fewer iterations keep the noise in the residual. Wenuray warns when the residual
+inside the source mask falls below 0.9 times the thermal noise, but doesn't know Pyralysis's mask
+yet ([#167](https://github.com/miguelcarcamov/wenuray/issues/167)).
+
 Wenuray needs Pyralysis 3.2.1 or later, from PyPI; its `ska-ost-array-config` dependency comes
 from SKA's index:
 
