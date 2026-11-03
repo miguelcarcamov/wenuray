@@ -1,0 +1,1 @@
+The installation guide picks Pyralysis's environment file by both the GPU and the driver, explains the solver error of a driver too old for it, gives the whole two-environment setup, and explains `OPENSSL_3.0.1 not found`; the Imagers page no longer suggests installing Pyralysis in Wenuray's environment first.

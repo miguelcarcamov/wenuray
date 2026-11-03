@@ -24,7 +24,16 @@ Check your card, its compute capability and its driver with:
 nvidia-smi --query-gpu=name,compute_cap,driver_version --format=csv
 ```
 
-A card that CUDA 13 supports also runs CUDA 12, if you would rather keep an older driver.
+Take the newest file your card **and** your driver both support: an A100, for instance, takes
+`cuda13` on driver R580 or newer, `cuda12` on R525 to R579, and `cuda11` on R470 to R524, which
+supports cards up to Ampere. A file your driver is too old for fails to solve:
+
+```text
+package cuda-version-13.0-... has constraint __cuda >=13 conflicting with __cuda-11.8-0
+```
+
+`__cuda-11.8` is the newest CUDA the driver runs (the "CUDA Version" at the top right of
+`nvidia-smi`): take an older file, or update the driver.
 
 ## Create and use
 
@@ -35,7 +44,9 @@ micromamba create -f envs/pyralysis-cuda12.yml
 export WENURAY_PYRALYSIS_PYTHON=$(micromamba run -n wenuray-pyralysis-cuda12 which python)
 ```
 
-Then use Wenuray from its own environment as usual; its `Pyralysis` imager runs in this one. The
+Then run Wenuray from its own environment (`environment.yml`, at the repository's root): its
+`Pyralysis` imager runs in this one. Don't install Wenuray in this environment: their pins conflict,
+and casatools fails to import here (`OPENSSL_3.0.1 not found`). The
 CUDA files install the toolkit and CuPy from conda-forge into the environment, so they need only
 the NVIDIA driver on the host. Don't also `pip install` a CuPy wheel or Pyralysis's `cupy` extras
 on top. If your shell exports `CUDA_PATH` to a system toolkit, unset it.

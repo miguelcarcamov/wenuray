@@ -45,11 +45,16 @@ Pyralysis's casacore and CASA's can't share one.
 the gain errors self-calibration should solve for.
 ```
 
-Wenuray needs Pyralysis 3.2.1 or later, from PyPI; its `ska-ost-array-config` dependency comes
-from SKA's index:
+Wenuray needs Pyralysis 3.2.1 or later. Install it in an environment of its own, from the files in
+`envs/` ([Installation](installation.md#pyralysis-on-cpu-or-gpu)), and point Wenuray to it (below).
+Pyralysis can also share Wenuray's environment, as in Wenuray's tests: pip resolves both freely (not
+with `requirements.txt`'s pins, which conflict with Pyralysis's), with the casatools wheel
+`requirements.txt` names, which imports on Debian, Ubuntu, Arch and in conda environments. From a
+clone, in a fresh Python 3.12 virtual environment, the wheel's Python (`ska-ost-array-config` comes
+from SKA's index):
 
 ```bash
-pip install "wenuray[pyralysis]" \
+pip install "$(grep '^casatools @' requirements.txt)" "wenuray[pyralysis]" \
   --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
 ```
 

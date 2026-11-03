@@ -62,22 +62,51 @@ install Wenuray itself with `pip install -e .` (from a clone) or `pip install we
 ## Pyralysis, on CPU or GPU
 
 Pyralysis's pins conflict with Wenuray's, so it gets a conda environment of its own, which Wenuray's
-Pyralysis imager runs in, whichever way you installed Wenuray.
+Pyralysis imager runs in, whichever way you installed Wenuray. **Two environments**, then: Wenuray's
+(above, or any of the other ways on this page), where you run `wenuray`, and Pyralysis's, which
+Wenuray runs its reconstructions in. Don't install Wenuray in Pyralysis's.
+
 [`envs/`](https://github.com/miguelcarcamov/wenuray/tree/master/envs) has one file for CPU and one
-for each CUDA line, since each CUDA release supports other GPUs:
+for each CUDA line. Each CUDA line needs a newer NVIDIA driver, and the newer lines dropped the
+oldest GPUs, so take **the newest line your GPU and your driver both support**:
 
-| File | GPUs |
-| --- | --- |
-| `pyralysis-cpu.yml` | none |
-| `pyralysis-cuda11.yml` | Kepler (Tesla K40, K80) |
-| `pyralysis-cuda12.yml` | Maxwell, Pascal, Volta (GTX 9xx and 10xx, P100, V100) |
-| `pyralysis-cuda13.yml` | Turing and newer (RTX 20xx and later, T4, A100, H100) |
+| File | CUDA | GPUs | Minimum driver |
+| --- | --- | --- | --- |
+| `pyralysis-cpu.yml` | - | none | - |
+| `pyralysis-cuda11.yml` | 11.4 | Kepler to Ampere (K80, P100, V100, T4, RTX 30xx, A100) | R470 |
+| `pyralysis-cuda12.yml` | 12.9 | Maxwell and newer (GTX 9xx and later) | R525 |
+| `pyralysis-cuda13.yml` | 13.0 | Turing and newer (RTX 20xx and later, T4, A100, H100) | R580 |
 
-From a clone, create it from the repository's root:
+For instance, an A100 takes `cuda13` on driver 580 or newer, `cuda12` on 525 to 579, and `cuda11`
+on 470 to 524. `nvidia-smi --query-gpu=name,compute_cap,driver_version --format=csv` shows your GPU
+and driver; the "CUDA Version" at the top right of `nvidia-smi` is the newest CUDA your driver
+runs. A file your driver is too old for fails to solve, e.g. on driver 520 (CUDA 11.8):
+
+```text
+package cuda-version-13.0-... has constraint __cuda >=13 conflicting with __cuda-11.8-0
+```
+
+Take an older file then, or update the driver.
+
+The whole setup, from a clone (`conda env create -f` works as `micromamba create -f`):
 
 ```bash
-micromamba create -f envs/pyralysis-cuda12.yml       # or conda env create -f ...
-export WENURAY_PYRALYSIS_PYTHON=$(micromamba run -n wenuray-pyralysis-cuda12 which python)
+# Wenuray's environment, where you run wenuray
+conda env create -f environment.yml
+conda activate wenuray-env
+pip install -e .
+# Pyralysis's, which Wenuray runs its reconstructions in
+conda env create -f envs/pyralysis-cuda12.yml
+export WENURAY_PYRALYSIS_PYTHON=$(conda run -n wenuray-pyralysis-cuda12 which python)
+wenuray run recipe.toml        # from wenuray-env
+```
+
+```{note}
+`OPENSSL_3.0.1 not found` when `wenuray` imports casatools means pip installed casatools's
+`manylinux_2_34` wheel, which can't load in a conda environment (or on Debian, Ubuntu, Arch).
+`environment.yml` and `requirements.txt` install the `manylinux_2_28` wheel, which can; so does
+`pip install -r requirements.txt` in any environment. It's also the error you get from installing
+Wenuray in Pyralysis's environment.
 ```
 
 Installed from PyPI, without a clone, download the file and the pins it installs,
@@ -97,7 +126,7 @@ For a release other than the latest, replace `master` with its tag (e.g. `v1.2.0
 
 The CUDA environments bring the toolkit and CuPy from conda-forge, so the host needs only the NVIDIA
 driver. [`envs/README.md`](https://github.com/miguelcarcamov/wenuray/blob/master/envs/README.md)
-has each file's minimum driver and how to check your card. The [Docker images](#with-docker) come
+has each file's compute capabilities and CuPy version. The [Docker images](#with-docker) come
 with this environment already.
 
 ## With Docker
