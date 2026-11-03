@@ -60,7 +60,9 @@ frequency.
 Pyralysis pins exact versions of its dependencies, which may conflict with Wenuray's. Since each
 reconstruction runs in a worker process that imports neither Wenuray nor CASA, Pyralysis can live in
 an environment of its own: set `WENURAY_PYRALYSIS_PYTHON` to that environment's Python (e.g.
-`/opt/pyralysis/bin/python`, as in Wenuray's images). The run record takes Pyralysis's version, and
+`/opt/pyralysis/bin/python`, as in Wenuray's images). The conda files in `envs/` build that
+environment on CPU or GPU ([Installation](installation.md#pyralysis-on-cpu-or-gpu)).
+The run record takes Pyralysis's version, and
 its environment's, from the worker.
 
 Numba needs OpenMP's runtime (`libgomp1`, present on most systems and in Wenuray's images) or TBB

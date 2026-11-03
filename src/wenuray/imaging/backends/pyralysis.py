@@ -61,6 +61,8 @@ CONTROLLED = {
     "stokes": "ImageGeometry",
     "weighting": "Weighting",
     "robust_parameter": "Weighting",
+    "restore_weighting": "Weighting",
+    "restore_robust_parameter": "Weighting",
     "term": "Pyralysis(terms=...)",
     "optimizer": "Pyralysis(optimizer=...)",
     "hermitian_symmetry": "the imager (off: it folds the visibilities in place)",
@@ -199,11 +201,16 @@ class Pyralysis(Imager):
             "cellsize": geometry.cell,
             "stokes": geometry.stokes,
             "weighting": WEIGHTINGS[self.weighting.weighting],
+            # The residual and restored images, their beam and so the round's noise and peak S/N,
+            # with the same weights as the reconstruction (#163): Pyralysis restores with natural
+            # weighting unless told otherwise
+            "restore_weighting": WEIGHTINGS[self.weighting.weighting],
             "term": list(self.terms),
             "optimizer": self.optimizer,
         }
         if self.weighting.weighting == "briggs":
             options["robust_parameter"] = self.weighting.robust
+            options["restore_robust_parameter"] = self.weighting.robust
         return {**dict(self.options), **options}
 
     def _reconstruct(self, request: ImagingRequest) -> ImagingResult:
