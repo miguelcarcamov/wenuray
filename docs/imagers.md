@@ -45,25 +45,49 @@ Pyralysis's casacore and CASA's can't share one.
 the gain errors self-calibration should solve for.
 ```
 
-Wenuray needs Pyralysis 3.2.1 or later, from PyPI; its `ska-ost-array-config` dependency comes
-from SKA's index:
+### Gridding
 
-```bash
-pip install "wenuray[pyralysis]" \
-  --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
+Pyralysis fits χ² on the visibilities, row by row, but predicts each row's model visibility, and
+the χ² gradient, from an FFT of the model on a padded grid, interpolated at the row's (u, v). Its
+defaults, bilinear interpolation on a grid padded by 1.2, are off by a few percent of the peak
+around bright emission ([clirai/pyralysis#414](https://gitlab.com/clirai/pyralysis/-/work_items/414)),
+and a model fitted through them makes up for it. A convolution kernel tabulated finely, on a grid
+padded by 2, is within 0.06% of the exact transform (tclean's default is within 0.02%):
+
+```python
+Pyralysis(geometry, weighting, terms=[...], optimizer="lbfgsb",
+          estimator="degridding", ckernel="gaussian-sinc", ckernel_oversampling=8,
+          padding_factor=2.0)
 ```
+
+Each iteration then costs more: the grid has about 2.8 times as many cells. Of the kernels
+Pyralysis's options build, all 3 cells wide, Gaussian-sinc is the most accurate; its prolate
+spheroidal (`pswf1`) needs 7 cells, as tclean's, which the options can't set yet.
+
+Pyralysis 3.3.0 grids the residual image, which gives the round's noise and peak S/N, at padding 1.2
+without a kernel whatever these options say, so it keeps a few percent of error around bright
+emission until Pyralysis grids it with them.
+
+Inside its mask, a model with a weak regularisation also fits the noise: the residual there falls
+below the thermal noise, which flatters the round's peak S/N. A stronger regularisation term, a
+tighter mask or fewer iterations keep the noise in the residual. Wenuray warns when the residual
+inside the source mask falls below 0.9 times the thermal noise, but doesn't know Pyralysis's mask
+yet ([#167](https://github.com/miguelcarcamov/wenuray/issues/167)).
+
+Wenuray needs Pyralysis 3.2.1 or later. The conda files and the Docker images install it with
+Wenuray, on CPU or GPU ([Installation](installation.md#with-conda-or-micromamba)); with pip,
+`pip install "wenuray[pyralysis]"`, with SKA's index for its `ska-ost-array-config`
+(`--extra-index-url https://artefact.skao.int/repository/pypi-internal/simple`).
 
 A `Selection(uvrange=...)` works with Pyralysis in metres or km (e.g. `"<3090m"`, the form the
 Nyquist check suggests); a range in wavelengths is refused, since it depends on each channel's
 frequency.
 
-Pyralysis pins exact versions of its dependencies, which may conflict with Wenuray's. Since each
-reconstruction runs in a worker process that imports neither Wenuray nor CASA, Pyralysis can live in
-an environment of its own: set `WENURAY_PYRALYSIS_PYTHON` to that environment's Python (e.g.
-`/opt/pyralysis/bin/python`, as in Wenuray's images). The conda files in `envs/` build that
-environment on CPU or GPU ([Installation](installation.md#pyralysis-on-cpu-or-gpu)).
-The run record takes Pyralysis's version, and
-its environment's, from the worker.
+Each reconstruction runs in a worker process of its own, since CASA's casacore and Pyralysis's
+can't share one; by default with the same Python as Wenuray. The worker imports neither Wenuray nor
+CASA, so `WENURAY_PYRALYSIS_PYTHON` can point it to another Python with Pyralysis, if you keep
+Pyralysis elsewhere. The run record takes Pyralysis's version, and its environment's, from the
+worker.
 
 Numba needs OpenMP's runtime (`libgomp1`, present on most systems and in Wenuray's images) or TBB
 for Pyralysis's parallel kernels; Wenuray checks for it when the imager is created.

@@ -4,9 +4,9 @@ observation of a protoplanetary disk, a ring with a compact source at its centre
 Pyralysis's noise injectors: antenna gain errors, then thermal noise. See ../pyralysis_simulation.py
 for what it writes (the observation, its ideal copy and the injected gains).
 
-Pyralysis lives in its own environment in Wenuray's images, so run this with that Python:
+Run it in an environment with Pyralysis (Wenuray's conda files and images have it):
 
-    /opt/pyralysis/bin/python examples/simulated/simulate.py tutorial.ms
+    python examples/simulated/simulate.py tutorial.ms
 
 The values (array, frequency, source, noise, gains) are this example's, chosen to show
 self-calibration at work, not Wenuray's.

@@ -38,6 +38,9 @@ jobs:
     - name: Run yapf
       run: |
         yapf --recursive --verbose --diff .
+    # The conda files are generated from requirements.txt (#170)
+    - name: Check the conda files
+      run: python tools/sync_envs.py --check
 
   # Every pull request into development adds a news fragment to changes/ for CHANGELOG.md, unless it
   # is labelled no-changelog or comes from Dependabot

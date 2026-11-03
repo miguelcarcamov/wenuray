@@ -62,14 +62,14 @@ Python is `>=3.11,<3.14`: the overlap of the CASA wheels (cp311 up to CASA 6.7.0
 ## Environment
 
 ```bash
-pip install -r requirements.txt -e ".[test]"   # pinned CI set; casatools wheels are Linux/macOS only
+pip install -r requirements.txt -e ".[test]"   # pinned CI set, with Pyralysis; casatools wheels are Linux/macOS only
 pre-commit install
 ```
 
 - CASA wheels exist only for specific Python versions; check `requires-python` in `pyproject.toml`.
 - CASA needs measures data (`casaconfig`) the first time `casatools` is imported. Without network access, provide a measures directory. The base image ships it in `/opt/casa/data`.
 - `requirements.txt` installs casatools from its `manylinux_2_28` wheel: the `manylinux_2_34` wheel fails to import outside RHEL-like systems (`OPENSSL_3.0.1 not found`).
-- The Docker images are optional and kept small (#148): `:base`/`:latest` (Pyralysis on CPU) and `:base-gpu`/`:gpu` (CUDA 12 for Pyralysis, from NVIDIA's pip wheels on the same `python:3.12-slim` base). Wenuray's pinned set is in `/opt/venv`; Pyralysis in its own `/opt/pyralysis` (`requirements-pyralysis.txt`, `-gpu.txt`; its pins conflict with ours), run through `WENURAY_PYRALYSIS_PYTHON`. Outside Docker, `envs/pyralysis-{cpu,cuda11,cuda12,cuda13}.yml` build that environment with conda (#155); keep their NumPy pin equal to `requirements-pyralysis.txt`'s. CASA measures data only. Don't `strip` Pyralysis's wheels: auditwheel-patched libraries (NumPy's OpenBLAS, Numba's threading layers) break. Build locally with `docker build .` (`--build-arg PYRALYSIS=pyralysis-gpu` for the GPU variant); `--build-arg MEASURES_SITE=<url>` picks another measures server.
+- The Docker images are optional and kept small (#148): `:base`/`:latest` (Pyralysis on CPU) and `:base-gpu`/`:gpu` (CUDA 12 for Pyralysis, from NVIDIA's pip wheels on the same `python:3.12-slim` base). One environment, `/opt/venv`, holds Wenuray, CASA and Pyralysis: `requirements.txt` pins them together (#170), and `requirements-gpu.txt` adds CUDA 12 for `:gpu`. Outside Docker, `environment.yml` (CPU) and `envs/wenuray-cuda{11,12,13}.yml` make the same environment with conda in one command; they are generated from `requirements.txt` by `tools/sync_envs.py` (`--check` in CI), so regenerate them after changing it. `WENURAY_PYRALYSIS_PYTHON` is only for running Pyralysis's worker with another Python. CASA measures data only. Don't `strip` Pyralysis's wheels: auditwheel-patched libraries (NumPy's OpenBLAS, Numba's threading layers) break. Build locally with `docker build .` (`--build-arg PYRALYSIS=pyralysis-gpu` for the GPU variant); `--build-arg MEASURES_SITE=<url>` picks another measures server.
 - `reproject` is an optional extra (`wenuray[reproject]`), imported inside `wenuray.utils.reproject()` only.
 
 ## Tests and linting
@@ -79,6 +79,7 @@ pytest tests/unit/ tests/examples/     # CASA-free
 pytest -m casa tests/integration/      # needs CASA
 pre-commit run --all-files             # yapf, YAML/TOML formatting, markdownlint, workflow schema
 python tools/sync_conventions.py --check
+python tools/sync_envs.py --check          # conda files match requirements.txt
 ```
 
 When you add behaviour, add the test under `tests/unit/` mirroring `src/wenuray/`; anything that needs CASA goes in `tests/integration/` on `wenuray.testing`'s simulated data. Run CASA tests in the Docker image where `casatools` can't import natively (`AGENTS.md`).

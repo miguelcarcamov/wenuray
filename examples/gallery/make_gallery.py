@@ -7,7 +7,8 @@ Reproducible: every scenario has its seed and a fixed date. In Wenuray's image:
     python examples/gallery/make_gallery.py gallery docs/_static/gallery --pyralysis-backend cupy
 
 Work already done in the output directory (simulations, runs) is reused, so a run can be resumed.
-Pyralysis runs with its own Python, WENURAY_PYRALYSIS_PYTHON (set in Wenuray's images).
+The simulations run with WENURAY_PYRALYSIS_PYTHON if it is set, as Pyralysis's worker does; by
+default with this Python.
 """
 import argparse
 import json

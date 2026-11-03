@@ -10,8 +10,7 @@ For each observation it writes, next to each other:
   calibration would give;
 - <ms>.gains.npz: each antenna's injected gain relative to the reference antenna, per integration.
 
-It runs with Pyralysis's Python (in Wenuray's images, /opt/pyralysis/bin/python) and imports
-neither wenuray nor casatools. Pyralysis 3.3's measurement sets need three patches for CASA, made in
+It runs with a Python that has Pyralysis and imports neither wenuray nor casatools. Pyralysis 3.3's measurement sets need three patches for CASA, made in
 write(): pyralysis#405 (subtables), #406 (frequency frame) and #407 (FEED).
 """
 from dataclasses import dataclass
