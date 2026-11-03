@@ -63,8 +63,10 @@ class TestConstruction:
             imager(maxiter=100)
 
     @pytest.mark.parametrize(
-        "name, source",
-        [("imsize", "ImageGeometry"), ("term", "terms"), ("hermitian_symmetry", "folds")]
+        "name, source", [
+            ("imsize", "ImageGeometry"), ("term", "terms"), ("hermitian_symmetry", "folds"),
+            ("restore_weighting", "Weighting")
+        ]
     )
     def test_settings_wenuray_controls_are_rejected(self, name, source):
         with pytest.raises(TypeError, match=source):
@@ -133,10 +135,26 @@ class TestOptions:
             "stokes": "I",
             "weighting": "robust",
             "robust_parameter": -0.5,
+            "restore_weighting": "robust",
+            "restore_robust_parameter": -0.5,
             "term": ["chi_squared"],
             "optimizer": "fista",
             "mask_mode": "file"
         }
+
+    @pytest.mark.parametrize("weighting", ["natural", "uniform"])
+    def test_images_are_restored_with_the_reconstructions_weighting(self, weighting):
+        """#163: Pyralysis restores with natural weighting unless told otherwise"""
+        options = Pyralysis(
+            GEOMETRY,
+            Weighting(weighting),
+            terms=["chi_squared"],
+            optimizer="lbfgsb",
+            mask_mode="file"
+        )._cli_options()
+
+        assert options["restore_weighting"] == options["weighting"] == weighting
+        assert "restore_robust_parameter" not in options
 
     def test_with_overrides(self):
         changed = imager(max_iter=100).with_overrides(max_iter=300, terms=["chi_squared"])
