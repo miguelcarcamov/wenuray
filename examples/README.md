@@ -19,6 +19,6 @@ each example's data and are not Wenuray defaults: adapt them to yours. Check a r
 it with `wenuray validate recipe.toml`, and see every value it sets with `wenuray show --defaults`.
 
 `pyralysis_simulation.py` and `figures.py` sit next to the examples so others can share them: the
-first simulates observations with Pyralysis (in its own environment) and writes them as measurement
+first simulates observations with Pyralysis and writes them as measurement
 sets CASA reads, the second draws the figures in one style. The tutorial (`simulated/`) and the
 gallery (`gallery/`) use both.

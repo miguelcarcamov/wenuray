@@ -74,25 +74,20 @@ tighter mask or fewer iterations keep the noise in the residual. Wenuray warns w
 inside the source mask falls below 0.9 times the thermal noise, but doesn't know Pyralysis's mask
 yet ([#167](https://github.com/miguelcarcamov/wenuray/issues/167)).
 
-Wenuray needs Pyralysis 3.2.1 or later, from PyPI; its `ska-ost-array-config` dependency comes
-from SKA's index:
-
-```bash
-pip install "wenuray[pyralysis]" \
-  --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
-```
+Wenuray needs Pyralysis 3.2.1 or later. The conda files and the Docker images install it with
+Wenuray, on CPU or GPU ([Installation](installation.md#with-conda-or-micromamba)); with pip,
+`pip install "wenuray[pyralysis]"`, with SKA's index for its `ska-ost-array-config`
+(`--extra-index-url https://artefact.skao.int/repository/pypi-internal/simple`).
 
 A `Selection(uvrange=...)` works with Pyralysis in metres or km (e.g. `"<3090m"`, the form the
 Nyquist check suggests); a range in wavelengths is refused, since it depends on each channel's
 frequency.
 
-Pyralysis pins exact versions of its dependencies, which may conflict with Wenuray's. Since each
-reconstruction runs in a worker process that imports neither Wenuray nor CASA, Pyralysis can live in
-an environment of its own: set `WENURAY_PYRALYSIS_PYTHON` to that environment's Python (e.g.
-`/opt/pyralysis/bin/python`, as in Wenuray's images). The conda files in `envs/` build that
-environment on CPU or GPU ([Installation](installation.md#pyralysis-on-cpu-or-gpu)).
-The run record takes Pyralysis's version, and
-its environment's, from the worker.
+Each reconstruction runs in a worker process of its own, since CASA's casacore and Pyralysis's
+can't share one; by default with the same Python as Wenuray. The worker imports neither Wenuray nor
+CASA, so `WENURAY_PYRALYSIS_PYTHON` can point it to another Python with Pyralysis, if you keep
+Pyralysis elsewhere. The run record takes Pyralysis's version, and its environment's, from the
+worker.
 
 Numba needs OpenMP's runtime (`libgomp1`, present on most systems and in Wenuray's images) or TBB
 for Pyralysis's parallel kernels; Wenuray checks for it when the imager is created.

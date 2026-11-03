@@ -76,8 +76,9 @@ pip install wenuray
 You need Python 3.11, 3.12 or 3.13 on Linux or macOS, the platforms CASA ships wheels for. Conda,
 Docker, source installs and the optional extras (Pyralysis, plots) are in the
 [installation guide](https://github.com/miguelcarcamov/wenuray/blob/development/docs/installation.md).
-Pyralysis runs in a conda environment of its own, on CPU or on CUDA 11, 12 or 13, from the files in
-[`envs/`](https://github.com/miguelcarcamov/wenuray/tree/master/envs).
+With conda or micromamba, one command installs Wenuray with CASA and Pyralysis, on CPU
+(`conda env create -f environment.yml`) or on a GPU with CUDA 11, 12 or 13 (the files in
+[`envs/`](https://github.com/miguelcarcamov/wenuray/tree/master/envs)).
 
 > **Debian, Ubuntu or Arch?** The casatools wheel pip picks by default fails to import there
 > (`OPENSSL_3.0.1 not found`). From a clone, `pip install -r requirements.txt .` pins a wheel that

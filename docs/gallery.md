@@ -216,8 +216,8 @@ ALMA C-8 · 345 GHz · up to 8.5 km: a protoplanetary disk with rings, gaps and 
 
 ## Make it yourself
 
-In Wenuray's Docker image, which holds Pyralysis in its own environment
-([Installation](installation.md#with-docker)):
+In an environment with Wenuray and Pyralysis, e.g. Wenuray's Docker image or a conda environment
+([Installation](installation.md)):
 
 ```bash
 python examples/gallery/make_gallery.py gallery docs/_static/gallery

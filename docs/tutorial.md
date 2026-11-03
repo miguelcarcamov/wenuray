@@ -56,11 +56,10 @@ recommends: the multiplicative errors first, then the additive ones, as in a rec
 
 The script writes three things: `tutorial.ms`, the corrupted observation; `tutorial.ms.ideal`, the
 same observation and the *same* thermal noise without gain errors, which is what a perfect
-calibration would give; and `tutorial.ms.gains.npz`, the injected gains. Pyralysis lives in its own
-environment in the image, so run it with that Python:
+calibration would give; and `tutorial.ms.gains.npz`, the injected gains:
 
 ```bash
-/opt/pyralysis/bin/python examples/simulated/simulate.py tutorial.ms
+python examples/simulated/simulate.py tutorial.ms
 ```
 
 ## 2. Describe the self-calibration
