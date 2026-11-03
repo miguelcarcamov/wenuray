@@ -1,0 +1,139 @@
+# Wenuray with CASA and Pyralysis on a GPU, with CUDA 13.0: driver R580 or newer, GPUs
+# from Turing on (compute capability 7.5 and above: RTX 20xx and later, T4, A100, H100).
+#
+# Generated from requirements.txt by tools/sync_envs.py: edit that file and run the script.
+#
+# Create:  conda env create -f envs/wenuray-cuda13.yml   (or micromamba create -f ...)
+# Use:     conda activate wenuray-cuda13, then wenuray run recipe.toml
+# From a clone, pip install -e . --no-deps in it installs your checkout instead of the release.
+#
+# On a GPU, CUDA's toolkit and CuPy come from conda-forge into the environment, which shadows a
+# system CUDA while it is active (unset CUDA_PATH if the shell exports one): the host needs only
+# NVIDIA's driver. Don't also pip install a cupy-* wheel or Pyralysis's cupy extras on top.
+name: wenuray-cuda13
+
+channels:
+- conda-forge
+
+dependencies:
+  # requirements.txt's interpreter and NumPy, so pip installs one NumPy only
+- python=3.12
+- numpy=2.3.5
+- pip
+  # CUDA's toolkit and CuPy
+- cuda-version=13.0
+- cuda
+- cupy>=14.0,<15
+- pip:
+  # ska-ost-array-config and the ska-* packages come from SKA's index
+  - --extra-index-url https://artefact.skao.int/repository/pypi-internal/simple
+  - appdirs==1.4.4
+  - astroplan==0.10.1
+  - astropy==6.1.7
+  - astropy-healpix==2.0.1
+  - astropy-iers-data==0.2026.11.2.0.34.55
+  - attrs==26.1.0
+  - autopep8==2.2.0
+  - cacheout==0.17.0
+  - casa-formats-io==0.3.1
+  - casaconfig==1.5.2
+  - casatasks==6.7.6.14
+  - casatools @ https://files.pythonhosted.org/packages/e3/fe/29ffbf125acd6ae63f4465ba59878627fd41221fce2ab369748d5df9a190/casatools-6.7.6.14-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=f6db5ec590fb988799a614a0143391d4987d2c0650235b56fbedbdac33295e18
+  - certifi==2026.10.23
+  - charset-normalizer==3.5.2
+  - click==8.5.0
+  - cloudpickle==3.1.2
+  - contourpy==1.4.0
+  - cycler==0.12.1
+  - dafits==2.0.0
+  - dask==2024.10.0
+  - dask-image==2026.5.0
+  - dask-ms==0.2.32
+  - deprecated==3.0.1
+  - distributed==2024.10.0
+  - docstring-parser==0.18.0
+  - donfig==0.8.1.post1
+  - ducc0==0.42.0
+  - filelock==4.2.7
+  - fonttools==4.68.0
+  - fsspec==2026.9.0
+  - gitdb==4.0.12
+  - gitpython==3.2.1
+  - google-crc32c==1.9.0
+  - h5py==3.16.0
+  - idna==3.20
+  - imageio==2.38.1
+  - importlib-metadata==10.1.0
+  - jinja2==3.1.6
+  - joblib==1.6.0
+  - jsonschema==4.26.0
+  - jsonschema-specifications==2025.9.1
+  - kiwisolver==1.5.1
+  - llvmlite==0.50.0
+  - locket==1.0.0
+  - markupsafe==3.0.4
+  - matplotlib==3.10.8
+  - more-itertools==10.2.0
+  - msgpack==1.2.4
+  - msgpack-numpy==0.4.8
+  - multimethod==1.11.2
+  - numba==0.68.1
+  - numcodecs==0.15.1
+  - numpy==2.3.5
+  - overrides==7.7.0
+  - packaging==26.3
+  - pandas==3.1.0
+  - partd==1.4.2
+  - photutils==3.0.0
+  - pillow==13.0.0
+  - pims==0.7
+  - prettytable==3.18.0
+  - psutil==6.1.1
+  - pyavm==0.9.9
+  - pycodestyle==2.15.0
+  - pyerfa==2.0.1.5
+  - pyfftw==0.15.1
+  - pyparsing==3.3.3
+  - pyralysis==3.3.0
+  - pyregion==2.3.0
+  - python-casacore==3.7.1
+  - python-dateutil==4.0.0
+  - python-gitlab==8.6.0
+  - pytz==2026.6
+  - pyyaml==6.0.3
+  - radio-beam==0.3.7
+  - referencing==0.37.0
+  - regions==0.10
+  - reproject==0.21.0
+  - requests==2.34.2
+  - requests-toolbelt==1.0.0
+  - rpds-py==2026.9.1
+  - schema==0.7.8
+  - scipy==1.15.0
+  - six==1.17.0
+  - ska-ost-array-config==5.0.0
+  - ska-schemas==1.43.1
+  - ska-sdp-datamodels==3.0.0
+  - ska-sdp-func-python==2.0.1
+  - ska-telmodel-client==1.31.2
+  - slicerator==1.1.0
+  - smmap==5.0.3
+  - snakeviz==2.2.0
+  - sortedcontainers==2.4.0
+  - spectral-cube==0.6.5
+  - tblib==3.2.2
+  - tifffile==2026.10.15
+  - tomli-w==1.2.0
+  - toolz==1.2.0
+  - tornado==6.6
+  - typing-extensions==4.16.0
+  - tzdata==2026.6
+  - urllib3==2.8.0
+  - wcwidth==0.9.4
+  - wrapt==2.5.2
+  - xarray==2025.8.0
+  - zarr==3.1.6
+  - zict==3.0.0
+  - zipp==4.1.2
+  - numba-cuda==0.30.4
+  - wenuray

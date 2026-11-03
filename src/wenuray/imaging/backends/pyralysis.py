@@ -42,9 +42,9 @@ from ..contract import Imager, ImagingRequest, ImagingResult
 logger = logging.getLogger(__name__)
 
 WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_pyralysis_worker.py")
-# The Python that runs the worker (#148): Pyralysis may live in an environment of its own, e.g.
-# /opt/pyralysis in Wenuray's images, since its pins conflict with Wenuray's. The worker imports
-# neither wenuray nor casatools, so any Python with Pyralysis runs it. Default: this Python
+# The Python that runs the worker. Default: this Python, which has Pyralysis when it is installed
+# with Wenuray (requirements.txt, the conda files and the images, #170). The worker imports neither
+# wenuray nor casatools, so any Python with Pyralysis runs it, e.g. one of another environment
 PYTHON_SETTING = "WENURAY_PYRALYSIS_PYTHON"
 # Pyralysis CLI options that Wenuray sets, and where each comes from
 CONTROLLED = {
@@ -275,7 +275,7 @@ def _worker_environment(interpreter: str):
     """
     The worker's environment variables: this process's, and, when its Python is a conda
     environment's (#155), CONDA_PREFIX set to that environment, as activating it would. CuPy finds
-    the CUDA libraries the environment installed (envs/pyralysis-cuda*.yml) through it; without it,
+    the CUDA libraries the environment installed (envs/wenuray-cuda*.yml) through it; without it,
     it may load a system CUDA's instead, built for other GPUs. None keeps this process's
     """
     prefix = os.path.dirname(os.path.dirname(os.path.abspath(interpreter)))

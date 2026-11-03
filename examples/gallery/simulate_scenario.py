@@ -3,7 +3,7 @@ Simulates one of the gallery's scenarios (scenarios.toml) with Pyralysis: its ta
 sized to its resolution, with its gain errors and thermal noise. Run with Pyralysis's Python
 (make_gallery.py does):
 
-    /opt/pyralysis/bin/python examples/gallery/simulate_scenario.py scenarios.toml vla-l-a vla-l-a.ms
+    python examples/gallery/simulate_scenario.py scenarios.toml vla-l-a vla-l-a.ms
 """
 import argparse
 import json

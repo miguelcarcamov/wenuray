@@ -94,8 +94,9 @@ Ask for one by name, e.g. *"use the feature-dev skill for issue #65"*.
     "cp -r /src /tmp/wenuray && cd /tmp/wenuray && pip install -q -e '.[test]' && pytest tests -q"
   ```
 
-- **Pyralysis** (optional extra) runs in a worker process; Numba there needs OpenMP
-  (`libgomp1`) or TBB.
+- **Pyralysis** (optional extra, in `requirements.txt`'s pinned set) runs in a worker process with
+  the same Python; Numba there needs OpenMP (`libgomp1`) or TBB. After changing
+  `requirements.txt`, run `python tools/sync_envs.py` to regenerate the conda files.
 - **Tests:** `pytest tests/unit` needs no CASA (CASA modules are stubbed when missing);
   `tests/integration` needs CASA and simulates its data with `wenuray.testing`. The full suite takes
   about ten minutes. Run the narrowest paths first.

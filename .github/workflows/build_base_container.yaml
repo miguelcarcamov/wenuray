@@ -8,8 +8,7 @@ on:
     - .github/workflows/build_base_container.yaml
     - Dockerfile
     - requirements.txt
-    - requirements-pyralysis.txt
-    - requirements-pyralysis-gpu.txt
+    - requirements-gpu.txt
   pull_request:
     branches:
     - development
@@ -18,8 +17,7 @@ on:
     - .github/workflows/build_base_container.yaml
     - Dockerfile
     - requirements.txt
-    - requirements-pyralysis.txt
-    - requirements-pyralysis-gpu.txt
+    - requirements-gpu.txt
   workflow_dispatch:
 
 # Superseded pull request runs are cancelled; pushes always finish so the published image is complete.
