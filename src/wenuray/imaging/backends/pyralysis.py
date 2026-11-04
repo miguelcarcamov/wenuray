@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import glob
 import json
 import logging
 import os
@@ -274,14 +275,18 @@ def _interpreter() -> str:
 def _worker_environment(interpreter: str):
     """
     The worker's environment variables: this process's, and, when its Python is a conda
-    environment's (#155), CONDA_PREFIX set to that environment, as activating it would. CuPy finds
-    the CUDA libraries the environment installed (envs/wenuray-cuda*.yml) through it; without it,
-    it may load a system CUDA's instead, built for other GPUs. None keeps this process's
+    environment's (#155), CONDA_PREFIX set to that environment, as activating it would. When the
+    environment has its own CUDA runtime (envs/wenuray-cuda*.yml), CUDA_PATH is set to it too:
+    CuPy looks for CUDA in CUDA_PATH, then next to an nvcc on PATH, and a system CUDA found that way
+    mixes its libraries with the environment's (#173). None keeps this process's
     """
     prefix = os.path.dirname(os.path.dirname(os.path.abspath(interpreter)))
     if not os.path.isdir(os.path.join(prefix, "conda-meta")):
         return None
-    return {**os.environ, "CONDA_PREFIX": prefix}
+    environment = {**os.environ, "CONDA_PREFIX": prefix}
+    if glob.glob(os.path.join(prefix, "lib", "libcudart.so*")):
+        environment["CUDA_PATH"] = prefix
+    return environment
 
 
 def _run(request: dict, cwd: str = None) -> dict:

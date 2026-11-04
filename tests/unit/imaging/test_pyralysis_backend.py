@@ -306,6 +306,27 @@ class TestWorkerEnvironment:
         assert worker.requests[-1].env["CONDA_PREFIX"] == str(tmp_path)
         assert worker.requests[-1].env["PATH"] == backend.os.environ["PATH"]
 
+    def test_a_conda_environment_with_cuda_is_cupys_cuda(self, worker, monkeypatch, tmp_path):
+        """#173: CuPy takes the environment's CUDA, not a system CUDA found through PATH"""
+        (tmp_path / "conda-meta").mkdir()
+        (tmp_path / "lib").mkdir()
+        (tmp_path / "lib" / "libcudart.so.11.0").touch()
+        monkeypatch.setenv(backend.PYTHON_SETTING, str(tmp_path / "bin" / "python"))
+        monkeypatch.setenv("CUDA_PATH", "/usr/local/cuda")
+
+        imager()
+
+        assert worker.requests[-1].env["CUDA_PATH"] == str(tmp_path)
+
+    def test_a_conda_environment_without_cuda_keeps_cuda_path(self, worker, monkeypatch, tmp_path):
+        (tmp_path / "conda-meta").mkdir()
+        monkeypatch.setenv(backend.PYTHON_SETTING, str(tmp_path / "bin" / "python"))
+        monkeypatch.setenv("CUDA_PATH", "/usr/local/cuda")
+
+        imager()
+
+        assert worker.requests[-1].env["CUDA_PATH"] == "/usr/local/cuda"
+
     def test_another_python_keeps_this_environment(self, worker, monkeypatch, tmp_path):
         monkeypatch.setenv(backend.PYTHON_SETTING, str(tmp_path / "bin" / "python"))
 
