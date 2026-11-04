@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from importlib import metadata
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Iterator, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Iterator, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
 
 import tomli_w
 from casatasks import applycal, gaincal
@@ -54,13 +54,25 @@ from .caltable import CalStack, CalTable, derive_spwmap
 from .observers import LoggingObserver, SelfcalObserver
 from .diagnostics import SolutionCoverage, gain_diagnostics, solution_coverage
 from .result import RoundRecord, SelfcalResult
-from .schedule import ScheduleError, validate_schedule
-from .steps import CalibrationStep, Severity
+from .schedule import ScheduleError, check_transition, validate_schedule
+from .steps import CalibrationStep, Repeat, ScheduleEntry, Severity
 from .workspace import MSWorkspace
 
 logger = logging.getLogger(__name__)
 
 RESULT_FILE = "selfcal.toml"
+
+
+class _PlannedRound(NamedTuple):
+    """
+    A round as the schedule plans it: the step, with "auto" resolved, how the round is described,
+    and why it can't run, if it can't
+    """
+    step: CalibrationStep
+    description: str
+    problem: str = ""
+
+
 # The run as a resolved recipe: `wenuray run <output>/recipe.toml --output <new>` reruns it
 RECIPE_FILE = "recipe.toml"
 
@@ -143,7 +155,8 @@ class Selfcal:
     imager :
         The imager; it must follow the self-calibration contract
     steps :
-        The calibration steps, in the order they run. Invalid orders raise ScheduleError here
+        The schedule: calibration steps, one round each, or Repeats of a step (#66), in the order
+        they run. Invalid orders raise ScheduleError here
     selection :
         One data selection for the solve, the apply and the imager
     solve :
@@ -158,7 +171,7 @@ class Selfcal:
     """
     ms: str
     imager: Imager
-    steps: Tuple[CalibrationStep, ...]
+    steps: Tuple[ScheduleEntry, ...]
     selection: Selection = Selection()
     solve: SolveOptions = SolveOptions()
     apply: ApplyOptions = ApplyOptions()
@@ -279,11 +292,22 @@ class Selfcal:
             raise TypeError("imager must be an Imager, not {0!r}".format(self.imager))
         object.__setattr__(self, "steps", tuple(self.steps))
         validate_schedule(self.steps, self.initial_stack)
-        for step in self.steps:
-            # Unknown imaging overrides raise here, before anything runs
-            self.imager.with_overrides(**step.imaging)
+        for entry in self.steps:
+            for step in entry.steps:
+                # Unknown imaging overrides raise here, before anything runs
+                self.imager.with_overrides(**step.imaging)
         if not self.output:
             object.__setattr__(self, "output", _default_output(self.ms))
+
+    @property
+    def planned_rounds(self) -> Optional[int]:
+        """
+        How many rounds the schedule runs at most, after the initial one; None when a Repeat
+        decides it during the run
+        """
+        if any(isinstance(entry, Repeat) for entry in self.steps):
+            return None
+        return sum(len(entry.steps) for entry in self.steps)
 
     def run(self, observers: Sequence[SelfcalObserver] = (LoggingObserver(), )) -> SelfcalResult:
         """
@@ -320,9 +344,9 @@ class Selfcal:
                 "cell": base.geometry.cell
             }
         state = self._start(base, observers)
-        for index, step in enumerate(self._rounds(state), start=1):
-            if not self._run_round(index, step, state, observers).accepted:
-                break
+        # The schedule stops itself: a rejected round ends the run, or, within a Repeat, the repeat
+        for index, planned in enumerate(self._rounds(state), start=1):
+            self._run_round(index, planned, state, observers)
         state.workspace.discard(*state.snapshots)
 
         selfcal_result = SelfcalResult(self.ms, state.stack, state.rounds, provenance)
@@ -365,23 +389,100 @@ class Selfcal:
         state.snapshots.append("round0")
         return state
 
-    def _rounds(self, state: _RunState) -> Iterator[CalibrationStep]:
+    def _rounds(self, state: _RunState) -> Iterator[_PlannedRound]:
         """
-        The steps to run, one round each. The schedule is consumed one round at a time, so an
-        entry can decide its next round from the state (#66)
+        The rounds to run. The schedule is consumed one round at a time, so an entry decides its
+        next round from the state (#66): a step's "auto" solint is resolved against the model the
+        last accepted round left, and a Repeat looks at its last round before it plans the next.
+        A rejected round ends the run, except within a Repeat, where it ends the repeat
         """
-        yield from self.steps
+        for entry in self.steps:
+            for step in entry.steps:
+                missing = self._missing_before(step, state)
+                if missing:
+                    logger.warning("The run stops before %s: %s", _describe(step), missing)
+                    return
+            if isinstance(entry, Repeat):
+                yield from self._repeat(entry, state)
+                continue
+            yield self._plan(entry)
+            if not state.rounds[-1].accepted:
+                return
+
+    def _repeat(self, entry: Repeat, state: _RunState) -> Iterator[_PlannedRound]:
+        """
+        The rounds of a Repeat: its step at the shortest solint the data support, round after
+        round, for as long as the Repeat goes on (Repeat.ends_before, Repeat.ends_after)
+        """
+        described = "Repeat of {0}".format(_describe(entry.step))
+        last = None
+        while True:
+            planned = self._plan(entry.step)
+            reason = "" if planned.problem else entry.ends_before(last, planned.step)
+            if reason:
+                logger.info("%s ends: %s", described, reason)
+                return
+            yield planned
+            reason = entry.ends_after(state.rounds[-1], planned.step)
+            if reason:
+                logger.info("%s ends: %s", described, reason)
+                return
+            last = planned.step
+
+    def _plan(self, step: CalibrationStep) -> _PlannedRound:
+        """
+        The step's round, with an "auto" solint resolved from the data against the accepted model
+        in MODEL_DATA
+        """
+        if not step.is_auto:
+            return _PlannedRound(step, _describe(step))
+        sample = preflight.read_sample(self.ms, self.selection)
+        if sample is None:
+            return _PlannedRound(
+                step, _describe(step),
+                "solint 'auto' needs a solution S/N estimate, and the data give none"
+            )
+        solint, why = preflight.shortest_solint(sample, step, self.solve)
+        if solint is None:
+            return _PlannedRound(
+                step, _describe(step), "solint 'auto' finds no solint that reaches minsnr: " + why
+            )
+        resolved = step.with_solint(solint)
+        logger.info("%s: solint 'auto' is %r, %s", _describe(step), solint, why)
+        return _PlannedRound(resolved, _describe(resolved, requested=step.solint))
+
+    @staticmethod
+    def _missing_before(step: CalibrationStep, state: _RunState) -> str:
+        """
+        What the accepted stack lacks for the step, which validation assumed but a Repeat whose
+        rounds were all rejected doesn't provide, e.g. phases before amplitudes; "" if nothing
+        """
+        return "; ".join(
+            finding.message for finding in check_transition(None, step, state.stack)
+            if finding.severity is Severity.ERROR
+        )
 
     def _run_round(
-        self, index: int, step: CalibrationStep, state: _RunState,
+        self, index: int, planned: _PlannedRound, state: _RunState,
         observers: Sequence[SelfcalObserver]
     ) -> RoundRecord:
         """
         One round: solve against DATA with the accepted stack pre-applied, apply, flag, image,
         judge, then keep the round or roll it back. Returns its record
         """
+        step = planned.step
         name = "round{0}".format(index)
-        label = "Round {0}/{1} {2}".format(index, len(self.steps), _describe(step))
+        total = self.planned_rounds
+        label = "Round {0}{1} {2}".format(
+            index, "" if total is None else "/{0}".format(total), planned.description
+        )
+        if planned.problem:
+            record = replace(
+                self._failed_record(index, step, planned.problem), step=planned.description
+            )
+            state.rounds.append(record)
+            _notify(observers, "on_round", record)
+            return record
         imager = state.base.with_overrides(**step.imaging)
         predicted, findings = self._predict_snr(step, state.accepted_imager, observers)
         with _phase(observers, label + ": solving"):
@@ -390,7 +491,8 @@ class Selfcal:
             # Nothing was applied or imaged, so there is nothing to restore
             record = replace(
                 self._failed_record(index, step, "gaincal found no solutions", predicted),
-                findings=findings
+                findings=findings,
+                step=planned.description
             )
             state.rounds.append(record)
             _notify(observers, "on_round", record)
@@ -419,7 +521,7 @@ class Selfcal:
             index, step, table.path, result, current, decision.accepted, decision.reasons,
             state.thermal, data_flagged, predicted
         )
-        record = replace(record, solutions=self._coverage(step, table))
+        record = replace(record, step=planned.description, solutions=self._coverage(step, table))
         findings += self._advise("after_round", RoundContext(record), observers)
         record = replace(record, findings=findings)
         state.rounds.append(record)
@@ -685,10 +787,16 @@ def _phase(observers: Sequence[SelfcalObserver], phase: str) -> Iterator[None]:
     _notify(observers, "on_phase", phase, time.monotonic() - start)
 
 
-def _describe(step: Optional[CalibrationStep]) -> str:
+def _describe(step: Optional[CalibrationStep], requested: Optional[str] = None) -> str:
+    """
+    How the step is named in the log and the record, e.g. "Phasecal('60s')"; with requested, the
+    solint it was resolved from too: "Phasecal('auto' -> '96s')"
+    """
     if step is None:
         return ""
-    details = [repr(step.solint)]
+    details = [
+        repr(step.solint) if requested is None else "{0!r} -> {1!r}".format(requested, step.solint)
+    ]
     details += ["solve={0}".format(dict(step.solve))] if step.solve else []
     details += ["imaging={0}".format(dict(step.imaging))] if step.imaging else []
     details += ["flagging={0!r}".format(step.flagging)] if step.flagging != NoFlagging() else []

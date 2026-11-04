@@ -61,6 +61,7 @@ FAMILIES = {
         "phase": "wenuray.selfcalibration.steps:Phasecal",
         "amp": "wenuray.selfcalibration.steps:Ampcal",
         "ampphase": "wenuray.selfcalibration.steps:AmpPhasecal",
+        "repeat": "wenuray.selfcalibration.steps:Repeat",
     },
     "acceptance": {
         "psnr_improves": "wenuray.selfcalibration.acceptance:PSNRImproves",
@@ -79,7 +80,7 @@ FAMILIES = {
     "imager": {},
 }
 BASES = {
-    "step": "wenuray.selfcalibration.steps:CalibrationStep",
+    "step": "wenuray.selfcalibration.steps:ScheduleEntry",
     "acceptance": "wenuray.selfcalibration.acceptance:AcceptancePolicy",
     "flagging": "wenuray.selfcalibration.flagging:Flagging",
     "imager": "wenuray.imaging.contract:Imager",

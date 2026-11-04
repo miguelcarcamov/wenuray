@@ -37,6 +37,9 @@ MAD_TO_SIGMA = 1.4826
 MIN_DIFFERENCES = 20
 WEIGHTS_TOLERANCE = 0.1
 OUTLIER_Z = 5.0
+# solint="auto" (#66) takes the shortest solint whose predicted S/N reaches this many times minsnr,
+# so that the solutions' own scatter about the prediction leaves most of them above minsnr
+AUTO_SNR_FACTOR = 2.0
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,8 @@ class VisibilitySample:
         parallel hands" (XX - YY or RR - LL) of a visibility (#153)
     other_noise :
         The other estimate, (where from, noise), when both could be made
+    scan_lengths :
+        The duration of every selected scan, in s, which decides where solution intervals end
     """
     signal: float
     noise: float
@@ -92,6 +97,7 @@ class VisibilitySample:
     noise_over_sigma: Tuple[Tuple[str, str, int, float], ...] = ()
     noise_from: str = "consecutive integrations"
     other_noise: Optional[Tuple[str, float]] = None
+    scan_lengths: Tuple[float, ...] = ()
 
     @property
     def fractional_bandwidth(self) -> float:
@@ -134,23 +140,36 @@ class SolutionSNR:
         return self.snr >= self.minsnr
 
 
+def _solution_snr(sample: VisibilitySample, options: SolveOptions, solves_amplitude: bool) -> tuple:
+    """
+    The longest solint the options allow (a scan, or the observation when scans are combined) and
+    the predicted solution S/N as a function of the integrations a solution spans: the S/N CASA
+    compares with minsnr. For a table that solves amplitudes too, that is the antenna's S/N over
+    sqrt(2): on the same simulated data, gaincal reports SNR 75 for calmode "p" and 53 for "ap"
+    (diagnostics.py, tests/integration)
+    """
+    casa = 1.0 / math.sqrt(2) if solves_amplitude else 1.0
+    combine = {axis.strip() for axis in options.combine.split(",")}
+    longest = sample.span if "scan" in combine else sample.scan_length
+    nchannels = sum(sample.channels) if "spw" in combine else min(sample.channels)
+    npolarizations = sample.parallel_hands if options.gaintype == "T" else 1
+
+    def snr(integrations: int) -> float:
+        return casa * solution_snr(
+            sample.signal, sample.noise, sample.nantennas, integrations, nchannels, npolarizations
+        )
+
+    return combine, longest, snr
+
+
 def predict(sample: VisibilitySample, step: CalibrationStep, options: SolveOptions) -> SolutionSNR:
     """
     The solution S/N of the step with the run's solve options, from a sample of the data
     """
     options = step.solve_options(options)
-    combine = {axis.strip() for axis in options.combine.split(",")}
-    longest = sample.span if "scan" in combine else sample.scan_length
+    combine, longest, snr = _solution_snr(sample, options, step.solves_amplitude)
     seconds = step.solint_seconds
     nintegrations = max(1, round(min(seconds, longest) / sample.interval)) if seconds else 1
-    nchannels = sum(sample.channels) if "spw" in combine else min(sample.channels)
-    npolarizations = sample.parallel_hands if options.gaintype == "T" else 1
-
-    def snr(integrations: int, channels: int = nchannels) -> float:
-        return solution_snr(
-            sample.signal, sample.noise, sample.nantennas, integrations, channels, npolarizations
-        )
-
     prediction = snr(nintegrations)
     advice = ""
     if prediction < options.minsnr:
@@ -164,6 +183,90 @@ def predict(sample: VisibilitySample, step: CalibrationStep, options: SolveOptio
                 "scans" if "scan" not in combine else "more data, or use a longer solint"
             )
     return SolutionSNR(prediction, options.minsnr, advice)
+
+
+def shortest_solint(sample: VisibilitySample, step: CalibrationStep,
+                    options: SolveOptions) -> Tuple[Optional[str], str]:
+    """
+    What solint="auto" resolves to (#66): the shortest solint whose predicted solution S/N reaches
+    AUTO_SNR_FACTOR times the step's minsnr. The S/N grows as the square root of the integrations a
+    solution spans, so that is the first whole number of integrations past (target / S/N of one)
+    squared. If not even the longest solint reaches the target but it reaches minsnr, it is "inf";
+    if it doesn't reach minsnr either, there is none.
+
+    gaincal cuts each scan into intervals from its start and leaves the rest as a last, shorter
+    one, whose S/N, 2 x minsnr x sqrt(r / n) for r of n integrations, falls below minsnr when r < n
+    / 4, and whose data calflag then flags. So of the lengths from n to 2 n integrations, the solint
+    is the shortest that leaves the fewest integrations in such remainders across the scans
+    (_even_length).
+
+    Returns
+    -------
+    The solint ("int", "96s" or "inf"), or None, and why, for the log
+    """
+    options = step.solve_options(options)
+    combine, longest, snr = _solution_snr(sample, options, step.solves_amplitude)
+    target = AUTO_SNR_FACTOR * options.minsnr
+    per_integration = snr(1)
+    # Rounded before the ceiling, so that a ratio that is a whole number in exact arithmetic,
+    # e.g. (6 / 0.6)**2 = 100.00000000000001, doesn't take one more integration
+    needed = max(1, math.ceil(round((target / per_integration)**2, 9)))
+    measure = "CASA's S/N, the antenna's over sqrt(2) for amplitude solutions, " \
+        if step.solves_amplitude else ""
+    if needed == 1:
+        return "int", "{0}S/N {1:.1f} in one integration reaches {2:g} (2 x minsnr)".format(
+            measure, per_integration, target
+        )
+    if needed * sample.interval <= longest:
+        scans = _scan_integrations(sample, combine)
+        length, lost = _even_length(needed, scans)
+        why = "the shortest solint whose {0}S/N reaches {1:g} (2 x minsnr)".format(measure, target)
+        if length > needed:
+            why += (
+                ", {0} integrations rather than {1}, so that fewer scans end in a solution too short "
+                "to reach minsnr".format(length, needed)
+            )
+        if lost:
+            why += "; {0:.1%} of the integrations still do".format(lost / sum(scans))
+        return "{0:g}s".format(length * sample.interval), why
+    at_longest = snr(max(1, round(longest / sample.interval)))
+    if at_longest >= options.minsnr:
+        return "inf", "S/N {0:.1f} over a whole {1} reaches minsnr {2:g}, not {3:g}".format(
+            at_longest, "observation" if "scan" in combine else "scan", options.minsnr, target
+        )
+    return None, "S/N {0:.1f} over a whole {1} is below minsnr {2:g}".format(
+        at_longest, "observation" if "scan" in combine else "scan", options.minsnr
+    )
+
+
+def _scan_integrations(sample: VisibilitySample, combine: set) -> list:
+    """
+    The integrations of each stretch of data gaincal cuts into solution intervals: each scan, or
+    the whole observation when scans are combined
+    """
+    if "scan" in combine:
+        lengths = [sample.span]
+    else:
+        lengths = list(sample.scan_lengths) or [sample.scan_length]
+    return [max(1, round(length / sample.interval)) for length in lengths]
+
+
+def _even_length(needed: int, scans: list) -> Tuple[int, int]:
+    """
+    The solint, in integrations from needed to 2 x needed, that leaves the fewest integrations in
+    solutions too short to reach minsnr, the shortest of those that tie, and how many it leaves.
+    A remainder of r integrations reaches minsnr when 4 r >= needed (AUTO_SNR_FACTOR = 2, and the
+    S/N grows as the square root of the integrations)
+    """
+
+    def lost(length: int) -> int:
+        return sum(
+            remainder for remainder in (count % length for count in scans)
+            if remainder and AUTO_SNR_FACTOR**2 * remainder < needed
+        )
+
+    best = min(range(needed, 2 * needed + 1), key=lambda length: (lost(length), length))
+    return best, lost(best)
 
 
 def absorbed_spectrum(
@@ -279,6 +382,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         noise_over_sigma=_noise_over_sigma(per_baseline, _antenna_names(ms), dd_spw),
         noise_from=noise_from,
         other_noise=others[0] if others else None,
+        scan_lengths=tuple(float(length) for length in scan_lengths),
     )
 
 

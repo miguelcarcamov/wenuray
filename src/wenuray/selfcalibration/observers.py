@@ -80,7 +80,9 @@ class LoggingObserver(SelfcalObserver):
             logger.info("%s: done in %s", phase, duration(seconds))
 
     def on_start(self, selfcal: Selfcal) -> None:
-        self._steps, self._started, self._accepted = len(selfcal.steps), time.monotonic(), None
+        self._steps, self._started, self._accepted = (
+            selfcal.planned_rounds or 0, time.monotonic(), None
+        )
         logger.info(
             "Self-calibration of %s: %d steps imaged with %s%s, output in %s", selfcal.ms,
             len(selfcal.steps),
@@ -113,8 +115,8 @@ def round_block(record: RoundRecord, steps: int, previous: Optional[RoundRecord]
         lines = ["Round 0 initial image"]
     else:
         lines = [
-            "Round {0}/{1} {2}: {3}".format(
-                record.index, steps or "?", record.step,
+            "Round {0}{1} {2}: {3}".format(
+                record.index, "/{0}".format(steps) if steps else "", record.step,
                 "accepted" if record.accepted else "rejected"
             )
         ]

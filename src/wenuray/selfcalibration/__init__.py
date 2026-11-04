@@ -13,4 +13,4 @@ from .loop import Selfcal
 from .observers import GainPlotObserver, LoggingObserver, SelfcalObserver
 from .result import RoundRecord, SelfcalResult
 from .schedule import ScheduleError, ScheduleWarning, check_transition, validate_schedule
-from .steps import AmpPhasecal, Ampcal, CalibrationStep, Phasecal
+from .steps import AmpPhasecal, Ampcal, CalibrationStep, Phasecal, Repeat, ScheduleEntry

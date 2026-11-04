@@ -172,6 +172,8 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def _validate(args: argparse.Namespace) -> int:
+    from .selfcalibration import Repeat
+
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         selfcal = _load(args)
@@ -183,8 +185,15 @@ def _validate(args: argparse.Namespace) -> int:
     print("  ms:      {0}".format(selfcal.ms))
     print("  output:  {0}".format(selfcal.output))
     print("  imager:  {0}".format(type(selfcal.imager).__name__))
-    for index, step in enumerate(selfcal.steps, start=1):
-        print("  step {0}:  {1}({2!r})".format(index, type(step).__name__, step.solint))
+    for index, entry in enumerate(selfcal.steps, start=1):
+        steps = ", ".join(
+            "{0}({1!r})".format(type(step).__name__, step.solint) for step in entry.steps
+        )
+        print(
+            "  step {0}:  {1}".format(
+                index, steps if not isinstance(entry, Repeat) else "Repeat({0})".format(steps)
+            )
+        )
     return 0
 
 
