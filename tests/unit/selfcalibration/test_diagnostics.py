@@ -167,7 +167,13 @@ class TestCoverage:
         flags, times, spws, antennas = coverage_columns()
 
         assert cover(flags, times, spws, antennas, NAMES, 3, 3.0) == SolutionCoverage(
-            solutions=12, failed=0, intervals=3, short_intervals=0, min_antennas=3, minsnr=3.0
+            solutions=12,
+            failed=0,
+            intervals=3,
+            short_intervals=0,
+            min_antennas=3,
+            minsnr=3.0,
+            spws=(0, )
         )
 
     def test_failures_are_counted_by_antenna_and_interval(self):

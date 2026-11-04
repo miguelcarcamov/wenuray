@@ -44,7 +44,7 @@ from ..config import ApplyOptions, Selection, SolveOptions
 from ..imaging.contract import Imager, ImagingRequest, ImagingResult
 from ..utils.selfcal_utils import (
     columns_match, count_spectral_windows, get_spw_ids, is_column_in_ms, ms_fingerprint, open_table,
-    solution_summary
+    solution_summary, spws_with_unflagged_data
 )
 from . import preflight
 from .advisories import ADVISORIES, RoundContext, SolveContext, StartContext
@@ -52,7 +52,7 @@ from .acceptance import AcceptancePolicy, RoundMetrics
 from .flagging import NoFlagging
 from .caltable import CalStack, CalTable, derive_spwmap
 from .observers import LoggingObserver, SelfcalObserver
-from .diagnostics import gain_diagnostics, solution_coverage
+from .diagnostics import SolutionCoverage, gain_diagnostics, solution_coverage
 from .result import RoundRecord, SelfcalResult
 from .schedule import ScheduleError, validate_schedule
 from .steps import CalibrationStep, Severity
@@ -419,12 +419,9 @@ class Selfcal:
             index, step, table.path, result, current, decision.accepted, decision.reasons,
             state.thermal, data_flagged, predicted
         )
+        record = replace(record, solutions=self._coverage(step, table))
         findings += self._advise("after_round", RoundContext(record), observers)
-        coverage = solution_coverage(
-            table.path, step.min_antennas,
-            step.solve_options(self.solve).minsnr
-        )
-        record = replace(record, findings=findings, solutions=coverage)
+        record = replace(record, findings=findings)
         state.rounds.append(record)
         _notify(observers, "on_round", record)
         if decision.accepted:
@@ -566,6 +563,34 @@ class Selfcal:
             count_spectral_windows(self.ms)
         )
         return CalTable(path, step.calmode, tuple(spwmap), self.apply.interp)
+
+    def _coverage(self, step: CalibrationStep, table: CalTable) -> Optional[SolutionCoverage]:
+        """
+        How completely the step's table covers the data (#179): its failed solutions, and, for a
+        table solved per spectral window, the windows it has no solutions for. Those with
+        unflagged data in the selection stay uncalibrated; the others hold none, and CASA's
+        "no corresponding cal spws" about them is harmless
+        """
+        coverage = solution_coverage(
+            table.path, step.min_antennas,
+            step.solve_options(self.solve).minsnr
+        )
+        if coverage is None or table.spwmap:
+            return coverage
+        missing = [
+            spw for spw in range(count_spectral_windows(self.ms)) if spw not in coverage.spws
+        ]
+        if not missing:
+            return coverage
+        selected = set(get_spw_ids(self.ms, self.selection.spw)) & set(get_spw_ids(self.ms, ""))
+        uncalibrated = spws_with_unflagged_data(
+            self.ms, [spw for spw in missing if spw in selected]
+        )
+        return replace(
+            coverage,
+            uncalibrated_spws=tuple(uncalibrated),
+            empty_spws=tuple(spw for spw in missing if spw not in uncalibrated)
+        )
 
     def _apply(self, stack: CalStack, table: CalTable) -> None:
         applycal(

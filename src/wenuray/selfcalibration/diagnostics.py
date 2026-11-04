@@ -109,6 +109,15 @@ class SolutionCoverage:
         The solve's minimum solution S/N
     failed_antennas :
         The antennas with failed solutions, most failures first
+    spws :
+        The spectral windows the table has solutions for
+    uncalibrated_spws :
+        Selected spectral windows with unflagged data but no solutions, in a table solved per
+        spectral window: applycal leaves their data uncalibrated, without flagging them
+    empty_spws :
+        The measurement set's other spectral windows without solutions, which hold no unflagged
+        data (e.g. a split that keeps its original ids, or a flagged window): CASA reports them
+        ("no corresponding cal spws"), and nothing is lost
     """
     solutions: int
     failed: int
@@ -117,9 +126,13 @@ class SolutionCoverage:
     min_antennas: int
     minsnr: float
     failed_antennas: Tuple[str, ...] = ()
+    spws: Tuple[int, ...] = ()
+    uncalibrated_spws: Tuple[int, ...] = ()
+    empty_spws: Tuple[int, ...] = ()
 
     def __post_init__(self):
-        object.__setattr__(self, "failed_antennas", tuple(self.failed_antennas))
+        for name in ("failed_antennas", "spws", "uncalibrated_spws", "empty_spws"):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
 
 
 def solution_coverage(caltable: str, min_antennas: int,
@@ -169,6 +182,8 @@ def cover(
             str(names[antenna]) if 0 <= antenna < len(names) else str(antenna)
             for antenna, _ in sorted(failures.items(), key=lambda item: (-item[1], item[0]))
         ),
+        spws=tuple(sorted({int(spw)
+                           for spw in spws})),
     )
 
 

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 
 from ..utils.selfcal_utils import open_table
+from .advisories import spw_list
 from .caltable import CalTable
 
 if TYPE_CHECKING:
@@ -207,6 +208,20 @@ def _solutions(coverage) -> list:
                 ", ".join(coverage.failed_antennas[:3])
             )
         ]
+    if coverage.uncalibrated_spws:
+        texts.append(
+            "{0} unflagged data but no solutions: applycal leaves {1} uncalibrated".format(
+                _spws_hold(coverage.uncalibrated_spws),
+                "it" if len(coverage.uncalibrated_spws) == 1 else "them"
+            )
+        )
+    if coverage.empty_spws:
+        texts.append(
+            "{0} no unflagged data: CASA's \"no corresponding cal spws\" about {1} is "
+            "harmless".format(
+                _spws_hold(coverage.empty_spws), "it" if len(coverage.empty_spws) == 1 else "them"
+            )
+        )
     # Enough antennas everywhere is the decision's to say; too few is what the solutions show
     if coverage.short_intervals:
         texts.append(
@@ -214,6 +229,10 @@ def _solutions(coverage) -> list:
             format(coverage.short_intervals, coverage.intervals, coverage.min_antennas)
         )
     return texts
+
+
+def _spws_hold(spws) -> str:
+    return ("spw {0} holds" if len(spws) == 1 else "spws {0} hold").format(spw_list(spws))
 
 
 def _gains(gains) -> str:
@@ -226,7 +245,10 @@ def _gains(gains) -> str:
         above = gains.above_noise(ratio)
         if above is None:
             return text
-        return text + (": a correction" if above else ": consistent with noise")
+        return text + (
+            ": a correction"
+            if above else ": consistent with noise on {0} solutions".format(gains.solutions)
+        )
 
     parts = [judged("phase", gains.phase_over_noise)]
     if gains.amplitude_over_noise is not None:

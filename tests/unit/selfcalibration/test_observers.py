@@ -73,7 +73,7 @@ class TestRoundBlock:
         text = round_block(record(gains=GainDiagnostics(4.3, 1.1, solutions=7)), 3, None)
 
         assert "phase scatter 4.3 x noise: a correction; amplitude scatter 1.1 x noise: " \
-            "consistent with noise" in text
+            "consistent with noise on 7 solutions" in text
 
     def test_a_round_short_of_antennas_says_why_and_what_to_try(self):
         from wenuray.selfcalibration.observers import round_block
@@ -160,3 +160,14 @@ def test_the_summary_tabulates_every_round():
         "2", "AmpPhasecal('inf')", "310.0", "3.40", "2.22", "Jy", "4.3", "/", "1.1", "rejected"
     ]
     assert lines[-1] == "Final image: round1.image (round 1), PSNR 331.0, rms 3.40 x thermal"
+
+
+def test_spectral_windows_without_solutions_are_explained():
+    from wenuray.selfcalibration.observers import round_block
+
+    coverage = dict(COMPLETE, spws=(13, 15), uncalibrated_spws=(17, ), empty_spws=(0, 1, 2, 14))
+    text = round_block(record(solutions=coverage), 3, None)
+
+    assert "spw 17 holds unflagged data but no solutions: applycal leaves it uncalibrated" in text
+    assert 'spws 0-2, 14 hold no unflagged data: CASA\'s "no corresponding cal spws" about them ' \
+        "is harmless" in text
