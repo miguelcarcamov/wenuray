@@ -7,9 +7,10 @@
 # Use:     conda activate wenuray-cuda13, then wenuray run recipe.toml
 # From a clone, pip install -e . --no-deps in it installs your checkout instead of the release.
 #
-# On a GPU, CUDA's toolkit and CuPy come from conda-forge into the environment, which shadows a
-# system CUDA while it is active (unset CUDA_PATH if the shell exports one): the host needs only
-# NVIDIA's driver. Don't also pip install a cupy-* wheel or Pyralysis's cupy extras on top.
+# On a GPU, CUDA's toolkit and CuPy come from conda-forge into the environment, and Wenuray runs
+# Pyralysis with them, not with a system CUDA: the host needs only NVIDIA's driver. Using CuPy
+# yourself, export CUDA_PATH=$CONDA_PREFIX first. Don't also pip install a cupy-* wheel or
+# Pyralysis's cupy extras on top.
 name: wenuray-cuda13
 
 channels:

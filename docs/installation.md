@@ -43,12 +43,12 @@ newest line your GPU and your driver both support**.
 
 | File | CUDA | GPUs | Minimum driver |
 | --- | --- | --- | --- |
-| `envs/wenuray-cuda11.yml` | 11.4 | Kepler to Ampere (K80, P100, V100, T4, RTX 30xx, A100) | R470 |
+| `envs/wenuray-cuda11.yml` | 11.8 | Kepler to Ada (K80, P100, V100, T4, RTX 30xx, A100, RTX 40xx) | R520 |
 | `envs/wenuray-cuda12.yml` | 12.9 | Maxwell and newer (GTX 9xx and later) | R525 |
 | `envs/wenuray-cuda13.yml` | 13.0 | Turing and newer (RTX 20xx and later, T4, A100, H100) | R580 |
 
 An A100, for instance, takes `cuda13` on driver 580 or newer, `cuda12` on 525 to 579, and `cuda11`
-on 470 to 524. `nvidia-smi --query-gpu=name,compute_cap,driver_version --format=csv` shows your GPU
+on 520 to 524. `nvidia-smi --query-gpu=name,compute_cap,driver_version --format=csv` shows your GPU
 and driver; the "CUDA Version" at the top right of `nvidia-smi` is the newest CUDA your driver runs.
 A file your driver is too old for fails to solve, e.g. on driver 520 (CUDA 11.8):
 
@@ -57,8 +57,9 @@ package cuda-version-13.0-... has constraint __cuda >=13 conflicting with __cuda
 ```
 
 Take an older file then, or update the driver. The host needs only the driver: the environment
-brings CUDA's toolkit, and shadows a system CUDA while it is active (unset `CUDA_PATH` if your shell
-exports one). In a recipe, `array_backend = "cupy"` under `[imager]` runs Pyralysis on the GPU.
+brings CUDA's toolkit, and Wenuray runs Pyralysis with it (`CUDA_PATH` set to the environment), not
+with a system CUDA the host may also have. In a recipe, `array_backend = "cupy"` under `[imager]`
+runs Pyralysis on the GPU.
 
 ## From PyPI
 
