@@ -22,6 +22,7 @@ from casatools import ms as ms_tool_factory
 from ..config import Selection, SolveOptions
 from ..utils.selfcal_utils import channel_edges, open_table
 from .acceptance import solution_snr
+from .diagnostics import MAD_RELATIVE_ERROR, SIGNIFICANCE
 from .steps import CalibrationStep
 
 # Rows read for the estimate: blocks spread through the selection, each holding this many
@@ -48,7 +49,8 @@ class VisibilitySample:
     signal :
         Median amplitude of the model visibilities, in Jy
     noise :
-        Noise of the real or imaginary part of one visibility, in Jy
+        Noise of the real or imaginary part of one visibility, in Jy, from the estimate named by
+        noise_from (#153)
     nantennas :
         Antennas with unflagged cross-correlations
     interval :
@@ -71,6 +73,11 @@ class VisibilitySample:
         For each sampled baseline and spectral window, (antenna1, antenna2, spw, ratio): the
         noise of its consecutive-integration differences over the noise its SIGMA column states
         (#129). Near 1 when the weights are right
+    noise_from :
+        Which differences the noise comes from: "consecutive integrations" of a baseline, or "the
+        parallel hands" (XX - YY or RR - LL) of a visibility (#153)
+    other_noise :
+        The other estimate, (where from, noise), when both could be made
     """
     signal: float
     noise: float
@@ -83,6 +90,8 @@ class VisibilitySample:
     band: Tuple[float, float]
     weights: Tuple[float, float]
     noise_over_sigma: Tuple[Tuple[str, str, int, float], ...] = ()
+    noise_from: str = "consecutive integrations"
+    other_noise: Optional[Tuple[str, float]] = None
 
     @property
     def fractional_bandwidth(self) -> float:
@@ -234,21 +243,24 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
     weight_squares = sum(block["weights"][1] for block in blocks)
     sampled = sum(block["rows"] for block in blocks)
     model = np.concatenate([block["model"] for block in blocks])
-    per_baseline = {}
-    for block in blocks:
-        for key, (delta, sigma) in _differences(block, interval).items():
-            per_baseline.setdefault(key, []).append((delta, sigma))
-    differences = np.concatenate(
-        [delta for pairs in per_baseline.values() for delta, _ in pairs]
-        or [np.zeros(0, dtype=complex)]
-    )
+    estimates = {}
+    for name, differenced in (
+        ("consecutive integrations", lambda block: _differences(block, interval)),
+        ("the parallel hands", _hand_differences),
+    ):
+        per_baseline = {}
+        for block in blocks:
+            for key, (delta, sigma) in differenced(block).items():
+                per_baseline.setdefault(key, []).append((delta, sigma))
+        noise, count = _difference_noise(per_baseline)
+        if noise is not None:
+            estimates[name] = (noise, count, per_baseline)
     antennas = np.unique(np.concatenate([block["antennas"] for block in blocks]))
-    if model.size == 0 or differences.size < 10 or not np.any(model > 0):
+    if model.size == 0 or not estimates or not np.any(model > 0) or not weight_sum > 0:
         return None
-    components = np.concatenate([differences.real, differences.imag])
-    noise = MAD_TO_SIGMA * np.median(np.abs(components - np.median(components))) / math.sqrt(2)
-    if not noise > 0 or not weight_sum > 0:
-        return None
+    noise_from = _least_raised(estimates)
+    noise, _, per_baseline = estimates[noise_from]
+    others = [(name, float(value[0])) for name, value in estimates.items() if name != noise_from]
     scan_lengths = [
         times[scans == scan].max() - times[scans == scan].min() + interval
         for scan in np.unique(scans)
@@ -265,6 +277,8 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         band=(min(low for low, _ in edges), max(high for _, high in edges)),
         weights=(weight_sum * nrows / sampled, weight_squares * nrows / sampled),
         noise_over_sigma=_noise_over_sigma(per_baseline, _antenna_names(ms), dd_spw),
+        noise_from=noise_from,
+        other_noise=others[0] if others else None,
     )
 
 
@@ -332,6 +346,69 @@ def _differences(block: dict, interval: float) -> dict:
         baseline, ddid = divmod(int(key), 1000)
         differences[(*divmod(baseline, 100000), ddid)] = (delta[both], sigma[both])
     return differences
+
+
+def _hand_differences(block: dict) -> dict:
+    """
+    Differences of the parallel hands (XX - YY or RR - LL) of each visibility, by (antenna1,
+    antenna2, data description), with the noise the hands' SIGMA state together, the root mean
+    square of the two. An unpolarized source cancels, and so do the antenna gains wherever they are
+    the same in both hands, as the atmosphere's are, however fast they change (#153). None with
+    one hand
+    """
+    if block["parallel_hands"] < 2:
+        return {}
+    differences = {}
+    keys = block["baseline"] * 1000 + block["ddid"]
+    both = ~block["flags"][0] & ~block["flags"][1]
+    delta = block["data"][1] - block["data"][0]
+    sigma = np.broadcast_to(
+        np.sqrt((block["sigma"][0]**2 + block["sigma"][1]**2) / 2)[None, :], delta.shape
+    )
+    for key in np.unique(keys):
+        rows = keys == key
+        baseline, ddid = divmod(int(key), 1000)
+        differences[(*divmod(baseline, 100000), ddid)
+                    ] = (delta[:, rows][both[:, rows]], sigma[:, rows][both[:, rows]])
+    return differences
+
+
+def _difference_noise(per_baseline: dict) -> Tuple[Optional[float], int]:
+    """
+    The noise of the real or imaginary part of one visibility from differences of two
+    visibilities, which have sqrt(2) times it, and how many components it was measured on: a robust
+    (MAD) scatter. None with too few differences
+    """
+    differences = np.concatenate(
+        [delta for pairs in per_baseline.values() for delta, _ in pairs]
+        or [np.zeros(0, dtype=complex)]
+    )
+    if differences.size < 10:
+        return None, 0
+    components = np.concatenate([differences.real, differences.imag])
+    noise = MAD_TO_SIGMA * np.median(np.abs(components - np.median(components))) / math.sqrt(2)
+    return (float(noise), components.size) if noise > 0 else (None, 0)
+
+
+def _least_raised(estimates: dict) -> str:
+    """
+    Which noise estimate to trust (#153). Each one measures the noise when the source cancels in
+    its differences, and only a source that doesn't cancel raises it: gains that change within an
+    integration raise the consecutive integrations', a polarized source or different gains in the
+    two hands the parallel hands'. So the lower one is trusted, but only when it is lower by more
+    than SIGNIFICANCE standard errors of a MAD estimate (MAD_RELATIVE_ERROR / sqrt(n) of it): the
+    lower of two equal estimates is otherwise a little low, by chance
+    """
+    default = "consecutive integrations"
+    if len(estimates) < 2 or default not in estimates:
+        return next(iter(estimates))
+    (time_noise, time_count, _), (hand_noise, hand_count,
+                                  _) = (estimates[default], estimates["the parallel hands"])
+    error = math.hypot(
+        time_noise * MAD_RELATIVE_ERROR / math.sqrt(time_count),
+        hand_noise * MAD_RELATIVE_ERROR / math.sqrt(hand_count)
+    )
+    return "the parallel hands" if time_noise - hand_noise > SIGNIFICANCE * error else default
 
 
 def _noise_over_sigma(per_baseline: dict, names: np.ndarray, dd_spw: np.ndarray) -> tuple:

@@ -97,8 +97,9 @@ noise, and on the extended arrays, whose sidelobes carry that fit beyond the mas
 times it outside. CLEAN's residual is 1.3 to 3 times the thermal noise inside its mask, where it
 leaves deconvolution errors, and the thermal noise outside. So Pyralysis's peak S/N is higher than
 tclean's on the same data, and its ideal image's too: the noise it reports is lower than the
-data's. Wenuray doesn't know Pyralysis's mask yet, so it can't measure the noise outside it
-([#167](https://github.com/miguelcarcamov/wenuray/issues/167)).
+data's. The gallery was made before Wenuray measured Pyralysis's rounds outside and inside its mask
+([#167](https://github.com/miguelcarcamov/wenuray/issues/167), 1.2.1): its Pyralysis noise is
+the whole residual's, with sigma clipping.
 
 | Residual noise over the thermal noise | tclean, in / out of the mask | Pyralysis, in / out of the mask |
 | --- | --- | --- |
@@ -336,9 +337,10 @@ Every scenario has its own seed and a fixed date, so each run gives the same fig
 where it stopped. `--only vla-q-a alma-b7-c8` runs some scenarios only, and `--imagers tclean` one
 imager only.
 
-Wenuray warns in some of these runs that the data's noise doesn't match their weights. It's a false
-alarm: Wenuray measures the noise from the difference between consecutive integrations, which keeps
-part of a bright source when the gains change within an integration's time, as they do here on the
-longest baselines; [#153](https://github.com/miguelcarcamov/wenuray/issues/153) makes that estimate
-robust. The simulated measurement sets also need the patches for Pyralysis 3.3 described in the
+Before 1.2.1, Wenuray warned in some of these runs that the data's noise didn't match their
+weights. It was a false alarm: it measured the noise from the difference between consecutive
+integrations, which keeps part of a bright source when the gains change within an integration's
+time, as they do here on the longest baselines. It now also measures it from the difference of the
+parallel hands, which those gains don't touch
+([#153](https://github.com/miguelcarcamov/wenuray/issues/153)). The simulated measurement sets also need the patches for Pyralysis 3.3 described in the
 [tutorial](tutorial.md#what-pyralysiss-simulation-needs-for-casa).

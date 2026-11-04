@@ -255,6 +255,27 @@ class TestImagingResultStatistics:
         assert statistics.model_flux == pytest.approx(1.0)
         assert statistics.beam == pytest.approx((2.0, 1.0, 45.0))
 
+    def test_a_2d_mask_on_4d_images_as_pyralysis_writes_them(self, tmp_path):
+        """#167: Pyralysis's mask is (y, x), its images (stokes, frequency, y, x)"""
+        rng = np.random.default_rng(1)
+        residual = rng.normal(0.0, 1e-3, (1, 1, 64, 64))
+        residual[..., 28:36, 28:36] = rng.normal(0.0, 1e-4, (8, 8))  # fitted noise in the mask
+        model = np.zeros((1, 1, 64, 64))
+        model[..., 32, 32] = 1.0
+        mask = np.zeros((64, 64), dtype=np.float32)
+        mask[28:36, 28:36] = 1.0
+        result = ImagingResult(
+            self.write(tmp_path / "r.fits", residual + model),
+            self.write(tmp_path / "res.fits", residual, beam=False),
+            self.write(tmp_path / "m.fits", model, beam=False),
+            self.write(tmp_path / "mask.fits", mask, beam=False),
+        )
+
+        statistics = result.statistics()
+
+        assert statistics.rms == pytest.approx(1e-3, rel=0.1)
+        assert statistics.rms_in_mask == pytest.approx(1e-4, rel=0.3)
+
     def test_a_missing_mask_is_ignored(self, tmp_path):
         rng = np.random.default_rng(0)
         image = rng.normal(0.0, 1e-3, (32, 32))

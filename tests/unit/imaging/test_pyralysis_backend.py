@@ -196,6 +196,28 @@ class TestReconstruct:
         assert options["mask_path"] == str(tmp_path / "masks" / "disk.fits")
         assert options["initial_model"] == absolute
 
+    @pytest.mark.parametrize(
+        "options, has_mask",
+        [
+            ({
+                "mask_mode": "file",
+                "mask_path": "masks/disk.fits"
+            }, True),
+            ({
+                "mask_mode": "auto",
+                "mask_threshold": 5.0
+            }, False),  # built in memory, no file
+        ]
+    )
+    def test_the_result_carries_the_file_mask(self, monkeypatch, tmp_path, options, has_mask):
+        """#167: so the round's noise leaves the source out and its in-mask residual is measured"""
+        monkeypatch.setattr(backend, "_taql", lambda ms, selection: "")
+        monkeypatch.chdir(tmp_path)
+
+        result = imager(**options)._reconstruct(ImagingRequest("target.ms", str(tmp_path / "r")))
+
+        assert result.mask == (str(tmp_path / "masks" / "disk.fits") if has_mask else None)
+
     def test_failures_raise_with_the_workers_message(self, worker, monkeypatch, tmp_path):
         monkeypatch.setattr(backend, "_taql", lambda ms, selection: "")
         built = imager()
