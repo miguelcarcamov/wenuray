@@ -52,7 +52,7 @@ from .acceptance import AcceptancePolicy, RoundMetrics
 from .flagging import NoFlagging
 from .caltable import CalStack, CalTable, derive_spwmap
 from .observers import LoggingObserver, SelfcalObserver
-from .diagnostics import gain_diagnostics
+from .diagnostics import gain_diagnostics, solution_coverage
 from .result import RoundRecord, SelfcalResult
 from .schedule import ScheduleError, validate_schedule
 from .steps import CalibrationStep, Severity
@@ -420,7 +420,11 @@ class Selfcal:
             state.thermal, data_flagged, predicted
         )
         findings += self._advise("after_round", RoundContext(record), observers)
-        record = replace(record, findings=findings)
+        coverage = solution_coverage(
+            table.path, step.min_antennas,
+            step.solve_options(self.solve).minsnr
+        )
+        record = replace(record, findings=findings, solutions=coverage)
         state.rounds.append(record)
         _notify(observers, "on_round", record)
         if decision.accepted:

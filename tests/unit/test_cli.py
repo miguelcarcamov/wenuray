@@ -160,7 +160,7 @@ def test_run_runs_the_recipe(capsys, recipe, monkeypatch):
     result = wenuray(capsys, "run", "--quiet", "--plots", recipe)
 
     assert result.status == 0
-    assert "2 of 3 rounds accepted; final image round2.image" in result.out
+    assert "1 of 2 steps accepted; final image round2.image" in result.out
     (selfcal, observers), = runs
     assert selfcal.solve == SolveOptions(refant="DA51")
     assert [type(observer).__name__ for observer in observers] == \
