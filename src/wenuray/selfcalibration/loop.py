@@ -506,8 +506,14 @@ class Selfcal:
             logger.debug("No thermal noise estimate for %s", self.ms)
             return None, None, findings
         logger.info(
-            "Thermal noise from the data: %.3g mJy/beam (natural weighting; a floor for others)",
-            sample.thermal_noise * 1e3
+            "Thermal noise from the data: %.3g mJy/beam (natural weighting; a floor for others), "
+            "from the noise of one visibility, %.3g Jy, measured on %s%s",
+            sample.thermal_noise * 1e3, sample.noise, sample.noise_from,
+            "" if sample.other_noise is None else " ({0}: {1:.3g} Jy{2})".format(
+                sample.other_noise[0], sample.other_noise[1],
+                ", raised by gains that change within an integration"
+                if sample.noise_from == "the parallel hands" else ""
+            )
         )
         ratios = [ratio for *_, ratio in sample.noise_over_sigma]
         return sample.thermal_noise, float(median(ratios)) if ratios else None, findings
