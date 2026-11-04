@@ -239,7 +239,11 @@ class Pyralysis(Imager):
             # Pyralysis and Dask may write scratch files in the working directory
             cwd=os.path.dirname(os.path.abspath(request.name)),
         )
-        return ImagingResult(outputs["restored"], outputs["residual"], outputs["model"])
+        # The mask the model was confined to, so the round's noise leaves the source out and its
+        # residual inside the mask is measured (#167), as tclean's .mask does. A mask_mode="auto"
+        # mask is built in memory and written nowhere, so there is none to give
+        mask = options.get("mask_path") if options.get("mask_mode") == "file" else None
+        return ImagingResult(outputs["restored"], outputs["residual"], outputs["model"], mask)
 
 
 @functools.lru_cache(maxsize=256)
