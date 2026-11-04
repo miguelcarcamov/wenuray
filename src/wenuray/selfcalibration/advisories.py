@@ -11,6 +11,7 @@ the loop doesn't change.
 """
 from __future__ import annotations
 
+import os
 from abc import ABC
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional, Tuple
@@ -156,7 +157,49 @@ class ResidualBelowThermal(Advisory):
         ]
 
 
+class SpectralWindowsUncalibrated(Advisory):
+    """
+    A round's table, solved per spectral window, has no solutions for windows with unflagged
+    data: applycal leaves their data uncalibrated, without flagging them, and they enter the image
+    so (#179)
+    """
+
+    def after_round(self, context: RoundContext) -> List[Finding]:
+        record = context.record
+        if record.solutions is None or not record.solutions.uncalibrated_spws:
+            return []
+        return [
+            Finding.warning(
+                "Round {0} {1}: {2} unflagged data but no solutions in {3}: applycal leaves "
+                "their data uncalibrated, without flagging them. Check their data, or combine "
+                "spectral windows (combine = \"spw\")".format(
+                    record.index, record.step, (
+                        "spw {0} holds"
+                        if len(record.solutions.uncalibrated_spws) == 1 else "spws {0} hold"
+                    ).format(spw_list(record.solutions.uncalibrated_spws)),
+                    os.path.basename(record.caltable)
+                )
+            )
+        ]
+
+
+def spw_list(spws) -> str:
+    """
+    Spectral window ids as people write them, runs as ranges: "0-12, 14, 16"
+    """
+    runs = []
+    for spw in sorted(spws):
+        if runs and spw == runs[-1][1] + 1:
+            runs[-1][1] = spw
+        else:
+            runs.append([spw, spw])
+    return ", ".join(
+        str(first) if first == last else "{0}-{1}".format(first, last) for first, last in runs
+    )
+
+
 # The advisories every run makes
 ADVISORIES: Tuple[Advisory, ...] = (
-    WeightsMisstateNoise(), SolutionSNRBelowMinimum(), SpectrumAbsorbed(), ResidualBelowThermal()
+    WeightsMisstateNoise(), SolutionSNRBelowMinimum(), SpectrumAbsorbed(), ResidualBelowThermal(),
+    SpectralWindowsUncalibrated()
 )

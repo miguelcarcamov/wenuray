@@ -740,3 +740,37 @@ def test_findings_reach_the_observers_and_the_record(casa, caplog):
     assert message in caplog.text  # and still logged without a LoggingObserver
     assert SelfcalResult.from_toml(str(Path(casa.ms).with_suffix("")) +
                                    "_selfcal/selfcal.toml").rounds[1].findings == (message, )
+
+
+def test_spectral_windows_without_solutions_are_sorted_by_their_data(casa, monkeypatch, caplog):
+    """
+    #179: a table solved per spw with solutions for spw 1 only. Spw 0 holds no data (a split
+    keeping its ids) and is harmless; spw 2 holds unflagged data, which stay uncalibrated
+    """
+    from wenuray.selfcalibration.diagnostics import SolutionCoverage
+    casa.coverage = SolutionCoverage(8, 0, 1, 0, 3, 3.0, spws=(1, ))
+    monkeypatch.setattr(loop, "count_spectral_windows", lambda ms: 3)
+    monkeypatch.setattr(loop, "get_spw_ids", lambda ms, spw: [1, 2])
+    monkeypatch.setattr(loop, "spws_with_unflagged_data", lambda ms, spws: [2])
+
+    with caplog.at_level(logging.WARNING):
+        result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run(observers=())
+
+    coverage = result.rounds[1].solutions
+    assert (coverage.uncalibrated_spws, coverage.empty_spws) == ((2, ), (0, ))
+    assert "spw 2 holds unflagged data but no solutions" in caplog.text
+    assert SelfcalResult.from_toml(
+        str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
+    ) == result
+
+
+def test_a_spw_combined_table_has_no_missing_spectral_windows(casa, monkeypatch):
+    from wenuray.selfcalibration.diagnostics import SolutionCoverage
+    casa.coverage = SolutionCoverage(8, 0, 1, 0, 3, 3.0, spws=(1, ))
+    monkeypatch.setattr(loop, "count_spectral_windows", lambda ms: 3)
+
+    result = Selfcal(
+        casa.ms, imager(1.0, 2.0), [Phasecal("inf")], solve=SolveOptions(combine="spw")
+    ).run(observers=())
+
+    assert result.rounds[1].solutions == casa.coverage
