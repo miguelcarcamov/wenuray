@@ -9,6 +9,13 @@ to add one.
 
 <!-- towncrier release notes start -->
 
+## [1.2.1](https://github.com/miguelcarcamov/wenuray/releases/tag/v1.2.1) (2026-11-04)
+
+### Bug fixes
+
+- The thermal noise (#119) and the weights check (#129) measure the noise of one visibility from the difference of the parallel hands (XX - YY or RR - LL) too, as well as from consecutive integrations. Gains that change within an integration leave part of the source in the consecutive differences and raise them, which made Wenuray overestimate the thermal noise and falsely warn that the weights understate the noise and that the model fits noise. The hands cancel an unpolarized source and the gains both share. The lower estimate is used, the hands' only when significantly lower, and the log names it and gives both: on simulated data with 40° of phase drawn every integration, the thermal noise is within 2% of the ideal data's, where consecutive integrations read the noise 9 times too high. ([#153](https://github.com/miguelcarcamov/wenuray/issues/153))
+- The Pyralysis imager gives each round its file mask (`mask_mode="file"`), as tclean's rounds have theirs. A round's noise is now measured outside the mask, without the source, and its residual inside the mask is measured too, so the warning that the model and gains fit noise there (#119) runs for Pyralysis. Before, the noise was the whole residual's, the source in it, and no in-mask residual was measured, so Pyralysis rounds' rms and peak S/N change. ([#167](https://github.com/miguelcarcamov/wenuray/issues/167))
+
 ## [1.2.0](https://github.com/miguelcarcamov/wenuray/releases/tag/v1.2.0) (2026-11-04)
 
 ### Features
