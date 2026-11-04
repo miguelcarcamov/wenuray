@@ -1,5 +1,8 @@
 """The Pyralysis imager (#24) without CASA or Pyralysis: the worker process is replaced."""
 import json
+import logging
+import sys
+import textwrap
 import warnings
 from types import SimpleNamespace
 from unittest import mock
@@ -12,6 +15,8 @@ from wenuray.imaging.backends.pyralysis import Pyralysis
 from wenuray.imaging.contract import ImagingRequest
 
 GEOMETRY = ImageGeometry(imsize=128, cell="2arcsec")
+# The real runner: the worker fixture replaces backend._stream
+STREAM = backend._stream
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +32,7 @@ def worker(monkeypatch):
             stderr=state.stderr
         )
 
-    monkeypatch.setattr(backend.subprocess, "run", run)
+    monkeypatch.setattr(backend, "_stream", run)
     backend._check.cache_clear()
     return state
 
@@ -293,7 +298,7 @@ class TestWorkerEnvironment:
 
         imager()
 
-        assert worker.requests[-1].command[:2] == ["/opt/pyralysis/bin/python", "-P"]
+        assert worker.requests[-1].command[:3] == ["/opt/pyralysis/bin/python", "-P", "-u"]
 
     def test_a_conda_environments_python_runs_as_if_activated(self, worker, monkeypatch, tmp_path):
         """#155: CuPy finds the environment's CUDA through CONDA_PREFIX, not a system CUDA"""
@@ -340,7 +345,7 @@ class TestWorkerEnvironment:
         def missing(command, **kwargs):
             raise FileNotFoundError(command[0])
 
-        monkeypatch.setattr(backend.subprocess, "run", missing)
+        monkeypatch.setattr(backend, "_stream", missing)
 
         with pytest.raises(ImportError, match="WENURAY_PYRALYSIS_PYTHON='/no/such/python'"):
             imager()
@@ -372,3 +377,68 @@ class TestAvailability:
         worker.reply, worker.returncode = {"error": "ModuleNotFoundError: pyralysis"}, 1
 
         assert not backend.pyralysis_available()
+
+
+class TestProgress:
+    """#176: the worker's output is logged while it runs, so a long reconstruction shows progress"""
+
+    def test_progress_is_logged_while_the_worker_runs(self, tmp_path, caplog):
+        flag = tmp_path / "seen"
+        script = tmp_path / "worker.py"
+        # The worker waits until the test has seen its progress: it would time out and fail if
+        # its output were read only when it ended
+        script.write_text(
+            textwrap.dedent(
+                """
+                import json, os, sys, time
+                sys.stdin.read()
+                print("[LBFGS-B] Iteration 1")
+                print("[LBFGS-B] Function value = 12.5")
+                print("a warning", file=sys.stderr)
+                for _ in range(200):
+                    if os.path.exists({flag!r}):
+                        break
+                    time.sleep(0.05)
+                else:
+                    sys.exit(3)
+                print(json.dumps({{"error": ""}}))
+                """.format(flag=str(flag))
+            )
+        )
+
+        class Seen(logging.Handler):
+
+            def emit(self, record):
+                if "iteration 1" in record.getMessage():
+                    flag.touch()
+
+        handler = Seen()
+        backend.logger.addHandler(handler)
+        try:
+            with caplog.at_level(logging.DEBUG, logger=backend.logger.name):
+                process = STREAM([sys.executable, "-u", str(script)], input="{}")
+        finally:
+            backend.logger.removeHandler(handler)
+
+        assert process.returncode == 0
+        assert json.loads(process.stdout.strip().splitlines()[-1]) == {"error": ""}
+        assert process.stderr == "a warning\n"
+        assert ("INFO", "Pyralysis LBFGS-B: iteration 1, objective 12.5") in [
+            (record.levelname, record.getMessage()) for record in caplog.records
+        ]
+
+    def test_the_first_and_every_tenth_iteration_are_info(self, caplog):
+        progress = backend._Progress()
+        with caplog.at_level(logging.DEBUG, logger=backend.logger.name):
+            for iteration in range(1, 21):
+                progress("[LBFGS-B] Iteration {0}".format(iteration))
+                progress("[LBFGS-B] Function value = {0}".format(100 - iteration))
+            progress("loading the data")
+
+        shown = [record.getMessage() for record in caplog.records if record.levelname == "INFO"]
+        assert shown == [
+            "Pyralysis LBFGS-B: iteration 1, objective 99",
+            "Pyralysis LBFGS-B: iteration 10, objective 90",
+            "Pyralysis LBFGS-B: iteration 20, objective 80",
+        ]
+        assert caplog.records[-1].levelname == "DEBUG"

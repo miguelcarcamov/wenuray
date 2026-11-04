@@ -23,9 +23,11 @@ The loop::
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import platform
+import time
 from statistics import median
 from datetime import datetime, timezone
 from importlib import metadata
@@ -341,9 +343,15 @@ class Selfcal:
         and the checks of the data that hold for the whole run
         """
         workspace = MSWorkspace(self.ms, self.selection, self.apply)
-        self._reset_corrected(workspace)
-        result = self._image(base, "round0")
-        thermal, noise_over_sigma, findings = self._check_data(observers)
+        with _phase(
+            observers, "Round 0: CORRECTED_DATA set to DATA" +
+            (" with the initial stack" if len(self.initial_stack) else "")
+        ):
+            self._reset_corrected(workspace)
+        with _phase(observers, "Round 0: imaging with {0}".format(type(base).__name__)):
+            result = self._image(base, "round0")
+        with _phase(observers, "Checking the data: thermal noise and weights"):
+            thermal, noise_over_sigma, findings = self._check_data(observers)
         metrics = RoundMetrics(result.statistics())
         record = replace(
             self._record(0, None, "", result, metrics, True, ("initial image", ), thermal),
@@ -373,9 +381,11 @@ class Selfcal:
         judge, then keep the round or roll it back. Returns its record
         """
         name = "round{0}".format(index)
+        label = "Round {0}/{1} {2}".format(index, len(self.steps), _describe(step))
         imager = state.base.with_overrides(**step.imaging)
         predicted, findings = self._predict_snr(step, state.accepted_imager, observers)
-        table = self._solve(step, state.stack, name)
+        with _phase(observers, label + ": solving"):
+            table = self._solve(step, state.stack, name)
         if table is None:
             # Nothing was applied or imaged, so there is nothing to restore
             record = replace(
@@ -386,10 +396,16 @@ class Selfcal:
             _notify(observers, "on_round", record)
             return record
         _notify(observers, "on_solved", step, table)
-        self._apply(state.stack, table)
+        tables = len(state.stack) + 1
+        with _phase(
+            observers,
+            "{0}: applying {1} table{2}".format(label, tables, "s" if tables > 1 else "")
+        ):
+            self._apply(state.stack, table)
         # Residuals against the model the gains were solved with; restored if rejected
         data_flagged = step.flagging.flag(self.ms, self.selection)
-        result = self._image(imager, name)
+        with _phase(observers, "{0}: imaging with {1}".format(label, type(imager).__name__)):
+            result = self._image(imager, name)
         flagged, antennas = solution_summary(table.path)
         current = RoundMetrics(
             result.statistics(),
@@ -412,7 +428,8 @@ class Selfcal:
         else:
             state.roll_back()
             # MODEL_DATA must hold the accepted model again
-            self._image(state.accepted_imager, state.accepted_name + "_model")
+            with _phase(observers, label + ": rejected, imaging the accepted model again"):
+                self._image(state.accepted_imager, state.accepted_name + "_model")
         return record
 
     def _provenance(self) -> dict:
@@ -619,6 +636,18 @@ class Selfcal:
 
 def _default_output(ms: str) -> str:
     return str(Path(ms).with_suffix("")) + "_selfcal"
+
+
+@contextlib.contextmanager
+def _phase(observers: Sequence[SelfcalObserver], phase: str) -> Iterator[None]:
+    """
+    Tells the observers a phase of the run starts, and how long it took when it ends, so a long
+    run shows what it is doing (#176)
+    """
+    _notify(observers, "on_phase", phase, None)
+    start = time.monotonic()
+    yield
+    _notify(observers, "on_phase", phase, time.monotonic() - start)
 
 
 def _describe(step: Optional[CalibrationStep]) -> str:

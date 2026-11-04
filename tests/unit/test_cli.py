@@ -1,4 +1,5 @@
 """The wenuray command (#36): init, validate, show and run over TOML recipes."""
+import logging
 import os
 import textwrap
 import tomllib
@@ -188,3 +189,27 @@ def test_apply_records_the_application_in_the_run(capsys, tmp_path, monkeypatch)
     (application, ) = SelfcalResult.from_toml(str(run / "selfcal.toml")).applications
     assert application.ms == str(tmp_path / "line.ms"
                                  ) and application.selection == Selection(spw="1")
+
+
+@pytest.mark.parametrize(
+    "flags, level",
+    [((), logging.INFO), (("--quiet", ), logging.WARNING), (("--debug", ), logging.DEBUG)]
+)
+def test_run_logs_wenuray_at_the_level_asked(capsys, recipe, monkeypatch, flags, level):
+    """#176: --debug adds the details, e.g. Pyralysis's output; --quiet keeps warnings"""
+    record = SimpleNamespace(image="round1.image")
+    monkeypatch.setattr(
+        Selfcal, "run", lambda self, observers:
+        SimpleNamespace(rounds=[record], accepted_rounds=[record], final=record)
+    )
+    logger = logging.getLogger("wenuray")
+    monkeypatch.setattr(logger, "level", logger.level)
+
+    wenuray(capsys, "run", *flags, recipe)
+
+    assert logger.level == level
+
+
+def test_quiet_and_debug_exclude_each_other(capsys, recipe):
+    with pytest.raises(SystemExit):
+        cli.main(["run", "--quiet", "--debug", recipe])
