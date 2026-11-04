@@ -127,8 +127,51 @@ works, so a long round shows what it is doing:
 23:29:58 INFO    Pyralysis LBFGS-B: iteration 1, objective 0.41353077
 23:30:04 INFO    Pyralysis LBFGS-B: iteration 10, objective 0.059638306
 23:30:21 INFO    Round 1/2 Phasecal('inf'): imaging with Pyralysis: done in 29 s
-23:30:21 INFO    Round 1 Phasecal('inf') - PSNR: 57.612, ... - accepted: PSNR 19.797 -> 57.612
 ```
+
+Each round then ends with a block that says what was solved and how well, what the gains corrected,
+what the image shows and why the round was kept or not (#179). From a run on simulated data:
+
+```text
+12:25:26 INFO    Round 2/3 Phasecal('120s'): accepted
+  solutions  480 solutions over 60 intervals, all with S/N above 3
+  gains      phase scatter 1.9 x noise: a correction
+  image      PSNR 422.9 (+27.8% on round 1), rms 1.7 mJy/beam (2.78 x thermal), model flux 2.022 Jy
+  decision   accepted: PSNR 331.0 -> 422.9 (needs > 331.0); every solution interval has at least 3 antennas, enough to determine the gains
+12:26:26 INFO    Round 3/3 AmpPhasecal('inf'): accepted
+  solutions  8 solutions over 1 interval, all with S/N above 3
+  gains      phase scatter 4.3 x noise: a correction; amplitude scatter 1.1 x noise: consistent with noise
+  image      PSNR 472.5 (+11.8% on round 2), rms 1.57 mJy/beam (2.57 x thermal), model flux 1.906 Jy
+  decision   accepted: PSNR 422.9 -> 472.5 (needs > 422.9); every solution interval has at least 4 antennas, enough to determine the gains; model flux 2.022 -> 1.906 Jy (max loss 10%)
+```
+
+- **solutions**: the antenna solutions gaincal found, one per antenna, interval and spectral
+  window. A solution fails when its S/N is below `minsnr` or it has no data, and `applycal`
+  (calflag) then flags the data it would have calibrated; the block names the antennas that
+  failed most. An interval with fewer antennas than the step needs, 3 for phases (closure phases)
+  and 4 for amplitudes (closure amplitudes), leaves its gains undetermined.
+- **gains**: the scatter of the solutions over their own noise, from their S/N. About 1 means the
+  round corrected nothing beyond noise; "a correction" means it stands more than 3 standard
+  errors above 1, on as many solutions as the table has. Above, the amplitudes of round 3 are
+  consistent with noise: that step added nothing the phases hadn't.
+- **image**: the peak S/N and its change on the last accepted round, the residual noise against
+  the thermal noise from the data, and the model's flux.
+- **decision**: each acceptance rule and its result. A round rejected for lack of S/N in its
+  solutions adds a hint, e.g. a longer `solint` or `combine = "spw"`.
+
+At the end, a table of every round and the final image:
+
+```text
+12:26:26 INFO    Self-calibration finished in 3 min 35 s: 3 of 3 steps accepted
+  Round  Step                PSNR   rms/thermal  Model flux  Gains/noise  Decision
+  0      initial image       301.9  3.58         2.31 Jy     -            accepted
+  1      Phasecal('inf')     331.0  3.39         2.217 Jy    3.2          accepted
+  2      Phasecal('120s')    422.9  2.78         2.022 Jy    1.9          accepted
+  3      AmpPhasecal('inf')  472.5  2.57         1.906 Jy    4.3 / 1.1    accepted
+Final image: run/round3.image (round 3), PSNR 472.5, rms 2.57 x thermal
+```
+
+`selfcal.toml` records the same for each round (`solutions`, `gains`).
 
 `--quiet` keeps the warnings only; `--debug` adds the details, e.g. all of Pyralysis's output. CASA
 logs on its own, e.g. `clearcal::calibrater::setvi ... Forcing use of OLD VisibilityIterator`, a

@@ -146,8 +146,9 @@ def _run(args: argparse.Namespace) -> int:
     observers = [LoggingObserver()] + ([GainPlotObserver()] if args.plots else [])
     result = selfcal.run(observers)
     print(
-        "{0} of {1} rounds accepted; final image {2}".format(
-            len(result.accepted_rounds), len(result.rounds), result.final.image
+        "{0} of {1} steps accepted; final image {2}".format(
+            len(result.accepted_rounds) - 1,
+            len(result.rounds) - 1, result.final.image
         )
     )
     return 0

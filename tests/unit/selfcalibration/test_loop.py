@@ -66,6 +66,7 @@ def casa(monkeypatch, tmp_path):
         corrected_matches=True,
         sample=None,
         gains=None,
+        coverage=None,
     )
 
     def gaincal(**kwargs):
@@ -80,6 +81,9 @@ def casa(monkeypatch, tmp_path):
     monkeypatch.setattr(workspace, "flagmanager", mocks.flagmanager)
     monkeypatch.setattr(loop, "solution_summary", lambda table: (0.05, (8, 8, 8)))
     monkeypatch.setattr(loop, "gain_diagnostics", lambda table, amplitude: mocks.gains)
+    monkeypatch.setattr(
+        loop, "solution_coverage", lambda table, min_antennas, minsnr: mocks.coverage
+    )
     monkeypatch.setattr(loop.preflight, "read_sample", lambda ms, selection: mocks.sample)
     monkeypatch.setattr(loop, "get_spw_ids", lambda ms, spw: [0])
     monkeypatch.setattr(loop, "ms_fingerprint", lambda ms: "sha256:input")
@@ -306,7 +310,8 @@ class TestObservers:
         with caplog.at_level(logging.INFO, logger="wenuray"):
             Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run()
 
-        assert "Round 1 Phasecal('inf') - PSNR: 2000.000" in caplog.text
+        assert "Round 1/1 Phasecal('inf'): accepted" in caplog.text
+        assert "PSNR 2000.0 (+100.0% on round 0)" in caplog.text
         assert "1 of 1 steps accepted" in caplog.text
 
     def test_each_phase_is_logged_as_it_starts_and_ends(self, casa, caplog):
@@ -324,7 +329,9 @@ class TestObservers:
         assert any(message.startswith("Round 0: imaging with ") for message in messages)
         # A phase starts before its round's result is logged
         solving = messages.index("Round 1/1 Phasecal('inf'): solving")
-        result = next(i for i, message in enumerate(messages) if message.startswith("Round 1 "))
+        result = messages.index(
+            next(m for m in messages if m.startswith("Round 1/1 Phasecal('inf'): accepted"))
+        )
         assert solving < result
 
     def test_no_observers_means_no_logging(self, casa, caplog):
@@ -615,7 +622,7 @@ class TestThermalNoise:
 
         assert [record.thermal_noise for record in result.rounds] == [pytest.approx(1e-3)] * 2
         assert "Thermal noise from the data: 1 mJy/beam" in caplog.text
-        assert "Round 1 rms / thermal noise: 1.00" in caplog.text
+        assert "(1.00 x thermal)" in caplog.text
         assert SelfcalResult.from_toml(
             str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
         ) == result
@@ -699,8 +706,8 @@ def test_gain_diagnostics_are_recorded_for_each_solved_round(casa, caplog):
         result = Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run()
 
     assert [record.gains for record in result.rounds] == [None, casa.gains]
-    assert "Round 1 solutions over noise: phase 12.0, X-Y phase 1.6; outlying antennas: DV15" \
-        in caplog.text
+    assert "phase scatter 12.0 x noise; X-Y phase scatter 1.6 x noise; DV15 scatter more than " \
+        "their distance from the centre predicts" in caplog.text
     assert SelfcalResult.from_toml(
         str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
     ) == result

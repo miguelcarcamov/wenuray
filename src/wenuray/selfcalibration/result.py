@@ -15,7 +15,7 @@ import tomli_w
 from ..config import Selection
 from .application import Application, apply_to
 from .caltable import CalStack
-from .diagnostics import GainDiagnostics
+from .diagnostics import GainDiagnostics, SolutionCoverage
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,9 @@ class RoundRecord:
         antennas that stand out and the two polarizations compared
     findings :
         What the advisories found in the round, or in the data for the initial one (#141)
+    solutions :
+        How completely the round's gains were solved (#179): failed solutions, on which antennas,
+        and intervals with too few antennas
     """
     index: int
     step: str
@@ -81,6 +84,7 @@ class RoundRecord:
     noise_over_sigma: Optional[float] = None
     gains: Optional[GainDiagnostics] = None
     findings: Tuple[str, ...] = ()
+    solutions: Optional[SolutionCoverage] = None
 
     def __post_init__(self):
         if self.beam is not None:
@@ -91,6 +95,8 @@ class RoundRecord:
         object.__setattr__(self, "findings", tuple(self.findings))
         if isinstance(self.gains, Mapping):
             object.__setattr__(self, "gains", GainDiagnostics(**self.gains))
+        if isinstance(self.solutions, Mapping):
+            object.__setattr__(self, "solutions", SolutionCoverage(**self.solutions))
 
 
 @dataclass(frozen=True)
@@ -198,11 +204,13 @@ class SelfcalResult:
                     entry[name] = getattr(record, name)
             if record.findings:
                 entry["findings"] = list(record.findings)
-            if record.gains is not None:
-                entry["gains"] = {
-                    name: list(value) if isinstance(value, tuple) else value
-                    for name, value in dataclasses.asdict(record.gains).items() if value is not None
-                }
+            for name in ("gains", "solutions"):
+                if getattr(record, name) is not None:
+                    entry[name] = {
+                        key: list(value) if isinstance(value, tuple) else value
+                        for key, value in dataclasses.asdict(getattr(record, name)).items()
+                        if value is not None
+                    }
             rounds.append(entry)
         data = {
             "ms": relative(self.ms),

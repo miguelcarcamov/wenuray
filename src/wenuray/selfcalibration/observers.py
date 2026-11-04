@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -61,9 +62,15 @@ class SelfcalObserver:
 
 class LoggingObserver(SelfcalObserver):
     """
-    Logs the run at INFO through the `wenuray` logger: each phase as it starts and ends, and each
-    round's metrics and decision
+    Logs the run at INFO through the `wenuray` logger, as a trace a radio astronomer can follow
+    (#179): each phase as it starts and ends, a block per round (its solutions, its gains against
+    their noise, its image, the decision), and a summary of every round at the end
     """
+
+    def __init__(self):
+        self._steps = 0
+        self._started = None
+        self._accepted = None
 
     def on_phase(self, phase: str, seconds: Optional[float]) -> None:
         if seconds is None:
@@ -72,52 +79,194 @@ class LoggingObserver(SelfcalObserver):
             logger.info("%s: done in %s", phase, duration(seconds))
 
     def on_start(self, selfcal: Selfcal) -> None:
+        self._steps, self._started, self._accepted = len(selfcal.steps), time.monotonic(), None
         logger.info(
-            "Self-calibration of %s: %d steps, initial stack of %d tables, output in %s",
-            selfcal.ms, len(selfcal.steps), len(selfcal.initial_stack), selfcal.output
+            "Self-calibration of %s: %d steps imaged with %s%s, output in %s", selfcal.ms,
+            len(selfcal.steps),
+            type(selfcal.imager).__name__,
+            ", after an initial stack of {0} tables".format(len(selfcal.initial_stack))
+            if len(selfcal.initial_stack) else "", selfcal.output
         )
 
     def on_round(self, record: RoundRecord) -> None:
-        if math.isnan(record.psnr):
-            logger.info(
-                "Round %d %s - rejected: %s", record.index, record.step, "; ".join(record.reasons)
-            )
-            return
-        logger.info(
-            "Round %d %s - PSNR: %.3f, peak: %.3f mJy/beam, rms: %.3f mJy/beam, model flux: %.4g Jy, "
-            "flagged: %.1f%% - %s: %s", record.index, record.step or "initial image", record.psnr,
-            record.peak * 1e3, record.rms * 1e3, record.model_flux, 100 * record.flagged_fraction,
-            "accepted" if record.accepted else "rejected", "; ".join(record.reasons)
-        )
-        if record.gains is not None:
-            gains = record.gains
-            details = ["phase {0:.1f}".format(gains.phase_over_noise)]
-            if gains.amplitude_over_noise is not None:
-                details.append("amplitude {0:.1f}".format(gains.amplitude_over_noise))
-            if gains.xy_phase_over_noise is not None:
-                details.append("X-Y phase {0:.1f}".format(gains.xy_phase_over_noise))
-            if gains.xy_amplitude is not None:
-                details.append("X/Y amplitude {0:.1%} from 1".format(gains.xy_amplitude))
-            logger.info(
-                "Round %d solutions over noise: %s%s", record.index, ", ".join(details),
-                "; outlying antennas: " +
-                ", ".join(gains.outlying_antennas) if gains.outlying_antennas else ""
-            )
-        if record.thermal_noise:
-            logger.info(
-                "Round %d rms / thermal noise: %.2f%s", record.index,
-                record.rms / record.thermal_noise,
-                "" if record.rms_in_mask is None else ", inside the source mask: {0:.2f}".format(
-                    record.rms_in_mask / record.thermal_noise
-                )
-            )
+        logger.info("%s", round_block(record, self._steps, self._accepted))
+        if record.accepted:
+            self._accepted = record
 
     def on_finished(self, result: SelfcalResult) -> None:
-        logger.info(
-            "Self-calibration finished: %d of %d steps accepted, final PSNR %.3f",
-            len(result.accepted_rounds) - 1,
-            len(result.rounds) - 1, result.final.psnr
+        seconds = time.monotonic() - self._started if self._started is not None else None
+        logger.info("%s", summary(result, seconds))
+
+
+# The width of a round block's labels
+LABEL = 10
+
+
+def round_block(record: RoundRecord, steps: int, previous: Optional[RoundRecord]) -> str:
+    """
+    A round as a block of lines: what was solved and how completely, the gains against their
+    noise, the image, and the decision with its reasons. previous is the last accepted round, the
+    one this round is judged against; steps the number of steps in the run
+    """
+    if record.index == 0:
+        lines = ["Round 0 initial image"]
+    else:
+        lines = [
+            "Round {0}/{1} {2}: {3}".format(
+                record.index, steps or "?", record.step,
+                "accepted" if record.accepted else "rejected"
+            )
+        ]
+    if record.solutions is not None:
+        lines += _labelled("solutions", _solutions(record.solutions))
+    if record.gains is not None:
+        lines += _labelled("gains", [_gains(record.gains)])
+    if not math.isnan(record.psnr):
+        lines += _labelled("image", [_image(record, previous)])
+    if record.index > 0:
+        lines += _labelled(
+            "decision", [
+                "{0}: {1}".format(
+                    "accepted" if record.accepted else "rejected", "; ".join(record.reasons)
+                )
+            ]
         )
+        hint = _hint(record)
+        if hint:
+            lines += _labelled("hint", [hint])
+    return "\n".join(lines)
+
+
+def summary(result: SelfcalResult, seconds: Optional[float] = None) -> str:
+    """
+    Every round of a run in a table, and the final image
+    """
+    steps = len(result.rounds) - 1
+    accepted = len(result.accepted_rounds) - 1
+    rows = [("Round", "Step", "PSNR", "rms/thermal", "Model flux", "Gains/noise", "Decision")]
+    for record in result.rounds:
+        gains = "-"
+        if record.gains is not None:
+            gains = "{0:.1f}".format(record.gains.phase_over_noise)
+            if record.gains.amplitude_over_noise is not None:
+                gains += " / {0:.1f}".format(record.gains.amplitude_over_noise)
+        rows.append(
+            (
+                str(record.index),
+                record.step or "initial image",
+                "-" if math.isnan(record.psnr) else "{0:.1f}".format(record.psnr),
+                "{0:.2f}".format(record.rms / record.thermal_noise)
+                if record.thermal_noise and not math.isnan(record.rms) else "-",
+                "-" if math.isnan(record.model_flux) else "{0:.4g} Jy".format(record.model_flux),
+                gains,
+                "accepted" if record.accepted else "rejected",
+            )
+        )
+    widths = [max(len(row[column]) for row in rows) for column in range(len(rows[0]))]
+    final = result.final
+    lines = [
+        "Self-calibration finished{0}: {1} of {2} steps accepted".
+        format("" if seconds is None else " in " + duration(seconds), accepted, steps)
+    ] + [
+        "  " + "  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip()
+        for row in rows
+    ]
+    noise = (
+        ", rms {0:.2f} x thermal".format(final.rms /
+                                         final.thermal_noise) if final.thermal_noise else ""
+    )
+    lines.append(
+        "Final image: {0} (round {1}), PSNR {2:.1f}{3}".format(
+            final.image, final.index, final.psnr, noise
+        )
+    )
+    return "\n".join(lines)
+
+
+def _labelled(label: str, texts) -> list:
+    """
+    Lines under a label, the label on the first only
+    """
+    return [
+        "  {0} {1}".format((label if number == 0 else "").ljust(LABEL), text)
+        for number, text in enumerate(texts)
+    ]
+
+
+def _solutions(coverage) -> list:
+    counted = "{0} solutions over {1} interval{2}".format(
+        coverage.solutions, coverage.intervals, "" if coverage.intervals == 1 else "s"
+    )
+    if coverage.failed == 0:
+        texts = [counted + ", all with S/N above {0:g}".format(coverage.minsnr)]
+    else:
+        texts = [
+            counted + "; {0} ({1:.1%}) failed (S/N below {2:g}, or no data), most on {3}: "
+            "applycal flags the data they calibrate".format(
+                coverage.failed, coverage.failed / coverage.solutions, coverage.minsnr,
+                ", ".join(coverage.failed_antennas[:3])
+            )
+        ]
+    # Enough antennas everywhere is the decision's to say; too few is what the solutions show
+    if coverage.short_intervals:
+        texts.append(
+            "{0} of {1} intervals have fewer than {2} antennas: their gains are undetermined".
+            format(coverage.short_intervals, coverage.intervals, coverage.min_antennas)
+        )
+    return texts
+
+
+def _gains(gains) -> str:
+    """
+    Each scatter over its noise, and what it means: a correction, or noise
+    """
+
+    def judged(name: str, ratio: float) -> str:
+        text = "{0} scatter {1:.1f} x noise".format(name, ratio)
+        above = gains.above_noise(ratio)
+        if above is None:
+            return text
+        return text + (": a correction" if above else ": consistent with noise")
+
+    parts = [judged("phase", gains.phase_over_noise)]
+    if gains.amplitude_over_noise is not None:
+        parts.append(judged("amplitude", gains.amplitude_over_noise))
+    if gains.xy_phase_over_noise is not None:
+        parts.append(judged("X-Y phase", gains.xy_phase_over_noise))
+    if gains.xy_amplitude is not None:
+        parts.append("X/Y amplitude {0:.1%} from 1".format(gains.xy_amplitude))
+    text = "; ".join(parts)
+    if gains.outlying_antennas:
+        text += "; {0} scatter more than their distance from the centre predicts".format(
+            ", ".join(gains.outlying_antennas)
+        )
+    return text
+
+
+def _image(record: RoundRecord, previous: Optional[RoundRecord]) -> str:
+    text = "PSNR {0:.1f}".format(record.psnr)
+    if previous is not None and previous.psnr > 0:
+        text += " ({0:+.1%} on round {1})".format(record.psnr / previous.psnr - 1, previous.index)
+    text += ", rms {0:.3g} mJy/beam".format(record.rms * 1e3)
+    if record.thermal_noise:
+        text += " ({0:.2f} x thermal".format(record.rms / record.thermal_noise)
+        if record.rms_in_mask is not None:
+            text += ", {0:.2f} x inside the source mask".format(
+                record.rms_in_mask / record.thermal_noise
+            )
+        text += ")"
+    return text + ", model flux {0:.4g} Jy".format(record.model_flux)
+
+
+def _hint(record: RoundRecord) -> Optional[str]:
+    """
+    What to try when a round was rejected for lack of S/N in its solutions; nothing otherwise
+    """
+    coverage = record.solutions
+    starved = coverage is None or coverage.short_intervals > 0 or coverage.failed > 0
+    if record.accepted or not starved:
+        return None
+    return 'a longer solint, or combining spectral windows (combine = "spw"), gives each solution more S/N'
 
 
 class GainPlotObserver(SelfcalObserver):
