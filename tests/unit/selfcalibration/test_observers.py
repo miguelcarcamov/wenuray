@@ -36,7 +36,7 @@ def record(index=1, **fields):
         rms=2.08e-3,
         model_flux=2.22,
         thermal_noise=0.612e-3,
-        reasons=("PSNR 301.9 -> 331.0 (needs > 301.9)", )
+        reasons=("PSNR 301.9 -> 331.0", )
     )
     values.update(fields)
     return RoundRecord(**values)
@@ -63,7 +63,7 @@ class TestRoundBlock:
             "  gains      phase scatter 3.2 x noise: a correction",
             "  image      PSNR 331.0 (+9.6% on round 0), rms 2.08 mJy/beam (3.40 x thermal), "
             "model flux 2.22 Jy",
-            "  decision   accepted: PSNR 301.9 -> 331.0 (needs > 301.9)",
+            "  decision   accepted: PSNR 301.9 -> 331.0",
         ]
 
     def test_an_amplitude_correction_at_the_noise_says_so(self):
@@ -86,13 +86,13 @@ class TestRoundBlock:
                 step="AmpPhasecal('120s')",
                 accepted=False,
                 solutions=coverage,
-                reasons=("12 of 60 solution intervals have fewer than 4 antennas", )
+                reasons=("12 of 60 intervals < 4 antennas (max 0%)", )
             ), 3, None
         )
 
         assert "58 (12.1%) failed (S/N below 3, or no data)" in text
         assert "12 of 60 intervals have fewer than 4 antennas: their gains are undetermined" in text
-        assert "rejected: 12 of 60 solution intervals" in text
+        assert "rejected: 12 of 60 intervals < 4 antennas" in text
         assert 'hint       a longer solint, or combining spectral windows (combine = "spw")' in text
 
     def test_a_round_rejected_on_its_image_gives_no_hint(self):

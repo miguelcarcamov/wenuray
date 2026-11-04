@@ -123,10 +123,13 @@ class PSNRImproves(AcceptancePolicy):
 
     def decide(self, previous: RoundMetrics, current: RoundMetrics) -> Decision:
         before, after = previous.statistics.psnr, current.statistics.psnr
-        message = "PSNR {0:.1f} -> {1:.1f} (needs > {2:.1f})".format(
-            before, after, before * self.min_ratio
-        )
-        if after > before * self.min_ratio:
+        needed = before * self.min_ratio
+        message = "PSNR {0:.1f} -> {1:.1f}".format(before, after)
+        # The threshold is worth stating when it isn't simply the last PSNR, or wasn't reached
+        if after > needed and self.min_ratio == 1.0:
+            return Decision.accept(message)
+        message += " (needs > {0:.1f})".format(needed)
+        if after > needed:
             return Decision.accept(message)
         return Decision.reject(message)
 
@@ -149,9 +152,10 @@ class FluxNotLost(AcceptancePolicy):
 
     def decide(self, previous: RoundMetrics, current: RoundMetrics) -> Decision:
         before, after = previous.statistics.model_flux, current.statistics.model_flux
-        message = "model flux {0:.4g} -> {1:.4g} Jy (max loss {2:.0%})".format(
-            before, after, self.max_loss
-        )
+        if before > 0:
+            message = "flux {0:+.1%} (limit -{1:.0%})".format(after / before - 1, self.max_loss)
+        else:
+            message = "flux {0:.4g} -> {1:.4g} Jy".format(before, after)
         if after >= (1.0 - self.max_loss) * before:
             return Decision.accept(message)
         return Decision.reject(message)
@@ -186,13 +190,9 @@ class EnoughAntennas(AcceptancePolicy):
             return Decision.accept("no solutions to count antennas in")
         short = sum(count < needed for count in counts)
         if short == 0:
-            return Decision.accept(
-                "every solution interval has at least {0} antennas, enough to determine the "
-                "gains".format(needed)
-            )
-        message = (
-            "{0} of {1} solution intervals have fewer than {2} antennas, too few to determine the "
-            "gains (max {3:.0%})".format(short, len(counts), needed, self.max_short_fraction)
+            return Decision.accept("every interval >= {0} antennas".format(needed))
+        message = "{0} of {1} intervals < {2} antennas (max {3:.0%})".format(
+            short, len(counts), needed, self.max_short_fraction
         )
         if short / len(counts) <= self.max_short_fraction:
             return Decision.accept(message)

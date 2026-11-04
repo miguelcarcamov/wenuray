@@ -137,12 +137,12 @@ what the image shows and why the round was kept or not (#179). From a run on sim
   solutions  480 solutions over 60 intervals, all with S/N above 3
   gains      phase scatter 1.9 x noise: a correction
   image      PSNR 422.9 (+27.8% on round 1), rms 1.7 mJy/beam (2.78 x thermal), model flux 2.022 Jy
-  decision   accepted: PSNR 331.0 -> 422.9 (needs > 331.0); every solution interval has at least 3 antennas, enough to determine the gains
+  decision   accepted: PSNR 331.0 -> 422.9; every interval >= 3 antennas
 12:26:26 INFO    Round 3/3 AmpPhasecal('inf'): accepted
   solutions  8 solutions over 1 interval, all with S/N above 3
   gains      phase scatter 4.3 x noise: a correction; amplitude scatter 1.1 x noise: consistent with noise
   image      PSNR 472.5 (+11.8% on round 2), rms 1.57 mJy/beam (2.57 x thermal), model flux 1.906 Jy
-  decision   accepted: PSNR 422.9 -> 472.5 (needs > 422.9); every solution interval has at least 4 antennas, enough to determine the gains; model flux 2.022 -> 1.906 Jy (max loss 10%)
+  decision   accepted: PSNR 422.9 -> 472.5; every interval >= 4 antennas; flux -5.7% (limit -10%)
 ```
 
 - **solutions**: the antenna solutions gaincal found, one per antenna, interval and spectral
@@ -156,7 +156,9 @@ what the image shows and why the round was kept or not (#179). From a run on sim
   consistent with noise: that step added nothing the phases hadn't.
 - **image**: the peak S/N and its change on the last accepted round, the residual noise against
   the thermal noise from the data, and the model's flux.
-- **decision**: each acceptance rule and its result. A round rejected for lack of S/N in its
+- **decision**: each acceptance rule and its result: the PSNR must rise, every interval must keep the
+  antennas the step needs, and an amplitude step may not take more of the model's flux than its
+  limit. A round rejected for lack of S/N in its
   solutions adds a hint, e.g. a longer `solint` or `combine = "spw"`.
 
 At the end, a table of every round and the final image:
