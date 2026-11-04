@@ -152,13 +152,14 @@ Wenuray warns twice during this run, and here both are false alarms:
 - *The data's noise is 1.51 times the noise their weights state.*
 - *The residual inside the source mask is below the thermal noise* (rounds 2 and 3).
 
-Wenuray measures the noise from the difference between consecutive integrations, which cancels the
-source as long as the gains change slowly. In this simulation they change completely every
-integration, so the differences keep part of the source, and the noise measured comes out about
+Wenuray measured the noise from the difference between consecutive integrations, which cancels
+the source as long as the gains change slowly. In this simulation they change completely every
+integration, so the differences kept part of the source, and the noise measured came out about
 twice too high. The weights are right (`SIGMA` matches the noise of the ideal data exactly), and the
-residual isn't below the real thermal noise. Real gains change more slowly, but fast phase
-fluctuations do the same; making this estimate robust to them is
-[#153](https://github.com/miguelcarcamov/wenuray/issues/153).
+residual isn't below the real thermal noise. Since 1.2.1 Wenuray also measures the noise from the
+difference of the two parallel hands, which the gains, the same in both, don't touch, and uses it
+when it is the lower ([#153](https://github.com/miguelcarcamov/wenuray/issues/153)): neither
+warning is given then. The figures and numbers here were made before.
 
 ## What Pyralysis's simulation needs for CASA
 

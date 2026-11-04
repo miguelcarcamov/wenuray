@@ -170,3 +170,90 @@ class TestWeightAnomalies:
 
         assert "1 of 7 baselines" in message and "A6-A7 spw 0 (2.50)" in message
         assert "times the noise" not in message  # the median is right
+
+
+class TestNoiseFromTheHands:
+    """
+    #153: consecutive integrations cancel the source only if the gains hold over an integration;
+    the parallel hands cancel an unpolarized source and the gains both hands share
+    """
+    SIGMA = 0.05
+
+    def block(self, phase_per_integration=0.0, polarized=0.0, nant=8, ntimes=40, seed=0):
+        """A block of rows: a 1 Jy source, antenna phases drawn every integration, noise SIGMA"""
+        rng = np.random.default_rng(seed)
+        pairs = [(a, b) for a in range(nant) for b in range(a + 1, nant)]
+        phases = rng.normal(0.0, phase_per_integration, (ntimes, nant))
+        rows = [(t, a, b) for t in range(ntimes) for a, b in pairs]
+        time = np.array([60.0 * t for t, _, _ in rows])
+        antenna1 = np.array([a for _, a, _ in rows])
+        antenna2 = np.array([b for _, _, b in rows])
+        gain = np.exp(
+            1j *
+            (phases[time.astype(int) // 60, antenna1] - phases[time.astype(int) // 60, antenna2])
+        )
+        source = np.stack(
+            [np.full(len(rows), 1.0 + polarized),
+             np.full(len(rows), 1.0 - polarized)]
+        )
+        noise = rng.normal(0, self.SIGMA,
+                           (2, len(rows))) + 1j * rng.normal(0, self.SIGMA, (2, len(rows)))
+        data = (source * gain + noise)[:, None, :]
+        return {
+            "data": data,
+            "flags": np.zeros(data.shape, dtype=bool),
+            "sigma": np.full((2, len(rows)), self.SIGMA),
+            "baseline": antenna1 * 100000 + antenna2,
+            "ddid": np.zeros(len(rows), dtype=int),
+            "time": time,
+            "parallel_hands": 2,
+        }
+
+    def estimates(self, block):
+        from wenuray.selfcalibration.preflight import (
+            _difference_noise, _differences, _hand_differences
+        )
+        found = {}
+        for name, differences in (
+            ("consecutive integrations", _differences(block, 60.0)),
+            ("the parallel hands", _hand_differences(block)),
+        ):
+            per_baseline = {key: [pair] for key, pair in differences.items()}
+            noise, count = _difference_noise(per_baseline)
+            found[name] = (noise, count, per_baseline)
+        return found
+
+    def test_gains_that_change_every_integration_raise_only_the_time_differences(self):
+        from wenuray.selfcalibration.preflight import _least_raised
+        # 40 degrees of phase drawn anew every integration, as in the issue's simulation
+        estimates = self.estimates(self.block(np.radians(40.0)))
+
+        assert estimates["consecutive integrations"][0] > 2 * self.SIGMA
+        assert _least_raised(estimates) == "the parallel hands"
+        assert estimates["the parallel hands"][0] == pytest.approx(self.SIGMA, rel=0.05)
+
+    def test_steady_gains_keep_the_default(self):
+        from wenuray.selfcalibration.preflight import _least_raised
+        estimates = self.estimates(self.block())
+
+        # Both read the noise; the lower is only trusted when significantly lower
+        assert estimates["the parallel hands"][0] == pytest.approx(self.SIGMA, rel=0.05)
+        assert estimates["consecutive integrations"][0] == pytest.approx(self.SIGMA, rel=0.05)
+        assert _least_raised(estimates) == "consecutive integrations"
+
+    def test_a_polarized_source_raises_the_hands_and_keeps_the_default(self):
+        from wenuray.selfcalibration.preflight import _least_raised
+        # Stokes Q of 10%: XX - YY holds 0.2 Jy of source
+        estimates = self.estimates(self.block(polarized=0.1))
+
+        assert estimates["the parallel hands"][0] > 2 * self.SIGMA
+        assert _least_raised(estimates) == "consecutive integrations"
+
+    def test_one_hand_has_no_hand_differences(self):
+        from wenuray.selfcalibration.preflight import _hand_differences, _least_raised
+        block = self.block()
+        block["parallel_hands"] = 1
+
+        assert _hand_differences(block) == {}
+        assert _least_raised({"consecutive integrations": (0.05, 1000, {})}) == \
+            "consecutive integrations"

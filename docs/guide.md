@@ -40,8 +40,16 @@
   the imager a spectral model (tclean's `deconvolver="mtmfs"`, Pyralysis's `spectral_index`) or
   solve with `combine="spw"`.
 - **The noise floor.** After the initial image, Wenuray estimates the image's thermal noise from
-  the data: the noise of one visibility, from differences of consecutive integrations, averaged
-  down by the data weights (σ · √Σw² / Σw). It is exact for natural weighting and a floor for
+  the data: the noise of one visibility, averaged down by the data weights (σ · √Σw² / Σw). The
+  noise of one visibility comes from differences that cancel the source. Consecutive integrations
+  of a baseline cancel it while the gains hold over an integration; the parallel hands of a
+  visibility (XX − YY or RR − LL) cancel an unpolarized source and the gains both hands share, as
+  the atmosphere's are, however fast they change. Each estimate can only be raised by source that
+  doesn't cancel: gains that change within an integration raise the first, a polarized source or
+  different gains in the two hands the second. So Wenuray takes the lower one, the hands' only when
+  it is lower by more than 3 standard errors, and the log names it and gives both
+  ([#153](https://github.com/miguelcarcamov/wenuray/issues/153)). Adjacent channels aren't used:
+  smoothed spectra (e.g. Hanning) correlate their noise, which would read it too low. It is exact for natural weighting and a floor for
   briggs or uniform. Each round logs and records its residual noise against it (`thermal_noise`,
   and `rms_in_mask` inside the source mask). A residual inside the mask below 0.9× thermal is
   warned about: the model and the gains are fitting noise there. Image noise is always the MAD
