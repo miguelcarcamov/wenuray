@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
@@ -30,6 +30,12 @@ class SelfcalObserver:
     def on_start(self, selfcal: Selfcal) -> None:
         """
         Before anything is written
+        """
+
+    def on_phase(self, phase: str, seconds: Optional[float]) -> None:
+        """
+        When a phase of the run (resetting the data, solving, applying, imaging) starts, with
+        seconds None, and when it ends, with how long it took (#176)
         """
 
     def on_solved(self, step: CalibrationStep, table: CalTable) -> None:
@@ -55,8 +61,15 @@ class SelfcalObserver:
 
 class LoggingObserver(SelfcalObserver):
     """
-    Logs the run at INFO through the `wenuray` logger: each round's metrics and decision
+    Logs the run at INFO through the `wenuray` logger: each phase as it starts and ends, and each
+    round's metrics and decision
     """
+
+    def on_phase(self, phase: str, seconds: Optional[float]) -> None:
+        if seconds is None:
+            logger.info("%s", phase)
+        else:
+            logger.info("%s: done in %s", phase, duration(seconds))
 
     def on_start(self, selfcal: Selfcal) -> None:
         logger.info(
@@ -139,3 +152,15 @@ class GainPlotObserver(SelfcalObserver):
             figure.savefig(table.path + ".png", dpi=100, bbox_inches="tight")
         finally:
             plt.close(figure)
+
+
+def duration(seconds: float) -> str:
+    """
+    A duration as people read it: "8 s", "3 min 12 s", "1 h 05 min"
+    """
+    seconds = int(round(seconds))
+    if seconds < 60:
+        return "{0} s".format(seconds)
+    if seconds < 3600:
+        return "{0} min {1:02d} s".format(seconds // 60, seconds % 60)
+    return "{0} h {1:02d} min".format(seconds // 3600, seconds % 3600 // 60)

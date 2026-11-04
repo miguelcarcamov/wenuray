@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import warnings
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -293,25 +294,19 @@ def _run(request: dict, cwd: str = None) -> dict:
     """
     Runs the worker with a request and returns its reply, raising its error
     """
-    # -P: the worker's directory holds this module, which would shadow the pyralysis package
-    command = [_interpreter(), "-P", WORKER]
+    # -P: the worker's directory holds this module, which would shadow the pyralysis package;
+    # -u: its output unbuffered, so its progress is logged as it comes (#176)
+    command = [_interpreter(), "-P", "-u", WORKER]
     logger.debug("Running %s", " ".join(command))
     try:
-        process = subprocess.run(
-            command,
-            input=json.dumps(request),
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-            env=_worker_environment(command[0])
+        process = _stream(
+            command, input=json.dumps(request), cwd=cwd, env=_worker_environment(command[0])
         )
     except FileNotFoundError:
         raise ImportError(
             "{0}={1!r} is not a Python executable".format(PYTHON_SETTING, command[0])
         ) from None
     lines = process.stdout.strip().splitlines()
-    for line in lines[:-1]:
-        logger.debug("pyralysis: %s", line)
     try:
         reply = json.loads(lines[-1]) if lines else {}
     except json.JSONDecodeError:
@@ -333,6 +328,76 @@ def _run(request: dict, cwd: str = None) -> dict:
     if request.get("check"):
         raise TypeError("Invalid Pyralysis options: {0}".format(message))
     raise RuntimeError("Pyralysis failed (exit code {0}): {1}".format(process.returncode, message))
+
+
+# Pyralysis's progress lines (--verbose, on by default): "[LBFGS-B] Iteration 12", then the
+# iteration's "[LBFGS-B] Function value = 1.2345678"
+ITERATION = re.compile(r"^\[(?P<optimizer>[^\]]+)\] Iteration (?P<iteration>\d+)$")
+FUNCTION_VALUE = re.compile(r"^\[[^\]]+\] Function value = (?P<value>\S+)$")
+# The iterations logged at INFO: the first and every tenth; the others at DEBUG
+PROGRESS_EVERY = 10
+
+
+class _Progress:
+    """
+    Logs the worker's output as it comes (#176): Pyralysis's iterations at INFO, the first and
+    every PROGRESS_EVERY-th, with their objective; everything else at DEBUG
+    """
+
+    def __init__(self):
+        self.optimizer = None
+        self.iteration = None
+
+    def __call__(self, line: str) -> None:
+        match = ITERATION.match(line)
+        if match:
+            self.optimizer, self.iteration = match["optimizer"], int(match["iteration"])
+        match = FUNCTION_VALUE.match(line)
+        if match and self.iteration is not None:
+            shown = self.iteration == 1 or self.iteration % PROGRESS_EVERY == 0
+            logger.log(
+                logging.INFO if shown else logging.DEBUG,
+                "Pyralysis %s: iteration %d, objective %s", self.optimizer, self.iteration,
+                match["value"]
+            )
+            return
+        logger.debug("pyralysis: %s", line)
+
+
+def _stream(command: list, input: str, cwd: str = None, env: dict = None):
+    """
+    Runs the worker as subprocess.run(capture_output=True, text=True) would, but logs its output
+    while it runs, so a long reconstruction shows its progress (#176)
+    """
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        env=env
+    )
+    errors = []
+
+    def drain() -> None:
+        for line in process.stderr:
+            errors.append(line)
+            logger.debug("pyralysis: %s", line.rstrip("\n"))
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    process.stdin.write(input)
+    process.stdin.close()
+    progress, output = _Progress(), []
+    for line in process.stdout:
+        output.append(line)
+        progress(line.rstrip("\n"))
+    process.wait()
+    reader.join()
+    return subprocess.CompletedProcess(
+        command, process.returncode, "".join(output), "".join(errors)
+    )
 
 
 def _taql(ms_name: str, selection: Selection) -> str:

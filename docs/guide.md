@@ -119,6 +119,21 @@ wenuray run recipe.toml --ms other.ms      # the same procedure on another datas
 Errors are the same as from Python, e.g. a misspelt `refant` or an amplitude step before any phase
 step, and `wenuray` exits with status 1.
 
+`wenuray run` logs each phase as it starts and how long it took, and Pyralysis's iterations as it
+works, so a long round shows what it is doing:
+
+```text
+23:29:52 INFO    Round 1/2 Phasecal('inf'): imaging with Pyralysis
+23:29:58 INFO    Pyralysis LBFGS-B: iteration 1, objective 0.41353077
+23:30:04 INFO    Pyralysis LBFGS-B: iteration 10, objective 0.059638306
+23:30:21 INFO    Round 1/2 Phasecal('inf'): imaging with Pyralysis: done in 29 s
+23:30:21 INFO    Round 1 Phasecal('inf') - PSNR: 57.612, ... - accepted: PSNR 19.797 -> 57.612
+```
+
+`--quiet` keeps the warnings only; `--debug` adds the details, e.g. all of Pyralysis's output. CASA
+logs on its own, e.g. `clearcal::calibrater::setvi ... Forcing use of OLD VisibilityIterator`, a
+notice every calibration task gives.
+
 `preset = "group.toml"` lays a recipe over another TOML file, e.g. the solve options and imager
 settings your group shares: tables merge key by key and the recipe wins. Wenuray ships no presets,
 since its defaults come from theory or the data rather than from an instrument. A class of your

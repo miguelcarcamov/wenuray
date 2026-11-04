@@ -309,6 +309,24 @@ class TestObservers:
         assert "Round 1 Phasecal('inf') - PSNR: 2000.000" in caplog.text
         assert "1 of 1 steps accepted" in caplog.text
 
+    def test_each_phase_is_logged_as_it_starts_and_ends(self, casa, caplog):
+        """#176: a long run shows what it is doing, and how long each part took"""
+        with caplog.at_level(logging.INFO, logger="wenuray"):
+            Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run()
+
+        messages = [record.getMessage() for record in caplog.records]
+        for phase in (
+            "Round 0: CORRECTED_DATA set to DATA", "Checking the data: thermal noise and weights",
+            "Round 1/1 Phasecal('inf'): solving", "Round 1/1 Phasecal('inf'): applying 1 table"
+        ):
+            assert phase in messages
+            assert any(message.startswith(phase + ": done in ") for message in messages)
+        assert any(message.startswith("Round 0: imaging with ") for message in messages)
+        # A phase starts before its round's result is logged
+        solving = messages.index("Round 1/1 Phasecal('inf'): solving")
+        result = next(i for i, message in enumerate(messages) if message.startswith("Round 1 "))
+        assert solving < result
+
     def test_no_observers_means_no_logging(self, casa, caplog):
         with caplog.at_level(logging.INFO, logger="wenuray.selfcalibration.observers"):
             Selfcal(casa.ms, imager(1.0, 2.0), [Phasecal("inf")]).run(observers=())

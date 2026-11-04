@@ -85,7 +85,11 @@ def _parser() -> argparse.ArgumentParser:
 
     run = recipe_command("run", "run a recipe")
     run.add_argument("--plots", action="store_true", help="plot the gain solutions")
-    run.add_argument("--quiet", action="store_true", help="log warnings only")
+    verbosity = run.add_mutually_exclusive_group()
+    verbosity.add_argument("--quiet", action="store_true", help="log warnings only")
+    verbosity.add_argument(
+        "--debug", action="store_true", help="also log the details, e.g. Pyralysis's output"
+    )
     recipe_command("validate", "build a recipe's run and check it, without touching the data")
     show = recipe_command("show", "print a recipe with its presets laid in")
     show.add_argument("--defaults", action="store_true", help="also print the default values")
@@ -120,10 +124,24 @@ def _load(args: argparse.Namespace):
     return Selfcal.from_recipe(table)
 
 
+# Each line: when, how important, what (#176). The time shows how long each phase takes
+LOG_FORMAT = "%(asctime)s %(levelname)-7s %(message)s"
+LOG_TIME = "%H:%M:%S"
+
+
+def _log(level: int) -> None:
+    """
+    Logs Wenuray's messages on the terminal at level, in LOG_FORMAT; other libraries' at warnings
+    only, so --debug shows Wenuray's details without theirs
+    """
+    logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT, datefmt=LOG_TIME)
+    logging.getLogger("wenuray").setLevel(level)
+
+
 def _run(args: argparse.Namespace) -> int:
     from .selfcalibration import GainPlotObserver, LoggingObserver
 
-    logging.basicConfig(level=logging.WARNING if args.quiet else logging.INFO)
+    _log(logging.WARNING if args.quiet else logging.DEBUG if args.debug else logging.INFO)
     selfcal = _load(args)
     observers = [LoggingObserver()] + ([GainPlotObserver()] if args.plots else [])
     result = selfcal.run(observers)
@@ -165,7 +183,7 @@ def _apply(args: argparse.Namespace) -> int:
     from .config import Selection
     from .selfcalibration import SelfcalResult
 
-    logging.basicConfig(level=logging.INFO)
+    _log(logging.INFO)
     record = os.path.join(args.run, "selfcal.toml") if os.path.isdir(args.run) else args.run
     result = SelfcalResult.from_toml(record).apply_to(
         args.ms, Selection(args.field, args.spw, args.uvrange), args.applymode
