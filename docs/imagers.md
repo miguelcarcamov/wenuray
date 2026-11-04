@@ -70,9 +70,12 @@ emission until Pyralysis grids it with them.
 
 Inside its mask, a model with a weak regularisation also fits the noise: the residual there falls
 below the thermal noise, which flatters the round's peak S/N. A stronger regularisation term, a
-tighter mask or fewer iterations keep the noise in the residual. Wenuray warns when the residual
-inside the source mask falls below 0.9 times the thermal noise, but doesn't know Pyralysis's mask
-yet ([#167](https://github.com/miguelcarcamov/wenuray/issues/167)).
+tighter mask or fewer iterations keep the noise in the residual. With `mask_mode="file"`, each
+round measures its noise outside the mask and its residual inside it, and Wenuray warns when that
+falls below 0.9 times the thermal noise
+([#167](https://github.com/miguelcarcamov/wenuray/issues/167)). A `mask_mode="auto"` mask is
+built inside Pyralysis and written nowhere, so those rounds' noise is measured over the whole
+residual, with sigma clipping.
 
 Wenuray needs Pyralysis 3.2.1 or later. The conda files and the Docker images install it with
 Wenuray, on CPU or GPU ([Installation](installation.md#with-conda-or-micromamba)); with pip,

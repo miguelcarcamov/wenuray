@@ -185,3 +185,20 @@ def box_mask_64(path) -> str:
     mask[28:37, 28:37] = 1
     fits.PrimaryHDU(mask).writeto(path)
     return str(path)
+
+
+def test_a_round_measures_the_residual_inside_the_mask(tmp_path):
+    """
+    #167: the round's noise leaves the masked source out, and its residual inside the mask is
+    measured, so the check that the model fits noise there (#119) runs for Pyralysis too. An
+    unregularised chi-squared fit, free in every masked pixel, fits the noise there
+    """
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"))
+    imager = pyralysis_imager(mask_mode="file", mask_path=box_mask(tmp_path / "mask.fits"))
+
+    result = Selfcal(ms, imager, [Phasecal("inf")],
+                     solve=SolveOptions(refant="A0", minblperant=3)).run(observers=())
+
+    for record in result.rounds:
+        assert record.rms_in_mask is not None
+        assert record.rms_in_mask < record.rms

@@ -97,8 +97,9 @@ noise, and on the extended arrays, whose sidelobes carry that fit beyond the mas
 times it outside. CLEAN's residual is 1.3 to 3 times the thermal noise inside its mask, where it
 leaves deconvolution errors, and the thermal noise outside. So Pyralysis's peak S/N is higher than
 tclean's on the same data, and its ideal image's too: the noise it reports is lower than the
-data's. Wenuray doesn't know Pyralysis's mask yet, so it can't measure the noise outside it
-([#167](https://github.com/miguelcarcamov/wenuray/issues/167)).
+data's. The gallery was made before Wenuray measured Pyralysis's rounds outside and inside its mask
+([#167](https://github.com/miguelcarcamov/wenuray/issues/167), 1.2.1): its Pyralysis noise is
+the whole residual's, with sigma clipping.
 
 | Residual noise over the thermal noise | tclean, in / out of the mask | Pyralysis, in / out of the mask |
 | --- | --- | --- |
