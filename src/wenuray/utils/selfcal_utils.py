@@ -1,7 +1,7 @@
 import hashlib
 import os
 from contextlib import contextmanager
-from typing import Tuple
+from typing import Sequence, Tuple
 
 import numpy as np
 from casatools import ms, table
@@ -205,6 +205,45 @@ def get_spw_ids(ms_name: str = "", spw: str = "") -> list:
     finally:
         ms_tool.done()
     return sorted(int(spw_id) for spw_id in selection["spw"])
+
+
+def spws_with_unflagged_data(ms_name: str, spws: Sequence[int]) -> list:
+    """
+    Function that returns which of the given spectral windows hold any unflagged data. Each query
+    stops at the first unflagged row, so a window with data is found without reading it all
+
+    Parameters
+    ----------
+    ms_name :
+        Measurement set name
+    spws :
+        Spectral window ids
+
+    Returns
+    -------
+    Sorted list of the ids, of those given, with unflagged data
+    """
+    if not spws:
+        return []
+    with open_table(ms_name + "/DATA_DESCRIPTION") as description_table:
+        spw_of = description_table.getcol("SPECTRAL_WINDOW_ID")
+    found = []
+    with open_table(ms_name) as ms_table:
+        for spw in sorted(set(int(spw) for spw in spws)):
+            descriptions = [str(index) for index, owner in enumerate(spw_of) if owner == spw]
+            if not descriptions:
+                continue
+            query = ms_table.taql(
+                "SELECT FROM '{0}' WHERE DATA_DESC_ID IN [{1}] AND NOT ALL(FLAG) LIMIT 1".format(
+                    os.path.abspath(ms_name), ",".join(descriptions)
+                )
+            )
+            try:
+                if query.nrows() > 0:
+                    found.append(spw)
+            finally:
+                query.close()
+    return found
 
 
 def selected_rows(ms_name: str, field: str = "", spw: str = "", samples: int = 100) -> list:

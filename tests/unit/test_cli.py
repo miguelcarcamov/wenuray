@@ -160,7 +160,7 @@ def test_run_runs_the_recipe(capsys, recipe, monkeypatch):
     result = wenuray(capsys, "run", "--quiet", "--plots", recipe)
 
     assert result.status == 0
-    assert "2 of 3 rounds accepted; final image round2.image" in result.out
+    assert "1 of 2 steps accepted; final image round2.image" in result.out
     (selfcal, observers), = runs
     assert selfcal.solve == SolveOptions(refant="DA51")
     assert [type(observer).__name__ for observer in observers] == \
@@ -213,3 +213,21 @@ def test_run_logs_wenuray_at_the_level_asked(capsys, recipe, monkeypatch, flags,
 def test_quiet_and_debug_exclude_each_other(capsys, recipe):
     with pytest.raises(SystemExit):
         cli.main(["run", "--quiet", "--debug", recipe])
+
+
+@pytest.mark.parametrize("flags, filtered", [((), True), (("--debug", ), False)])
+def test_run_keeps_casas_routine_notices_quiet_but_with_debug(
+    capsys, recipe, monkeypatch, flags, filtered
+):
+    """#179: notices every run gets from CASA, which say nothing about the data"""
+    calls = []
+    monkeypatch.setattr(cli, "_quiet_casa_notices", lambda: calls.append(True))
+    record = SimpleNamespace(image="round1.image")
+    monkeypatch.setattr(
+        Selfcal, "run", lambda self, observers:
+        SimpleNamespace(rounds=[record] * 2, accepted_rounds=[record] * 2, final=record)
+    )
+
+    wenuray(capsys, "run", *flags, recipe)
+
+    assert bool(calls) is filtered

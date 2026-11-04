@@ -31,6 +31,11 @@ MAD_TO_SIGMA = 1.4826
 OUTLIER_Z = 3.5
 # Fewer antennas than this with solutions and a distance give no fit of scatter against distance
 MIN_ANTENNAS_FOR_FIT = 4
+# The relative standard error of a MAD scatter of n Gaussian values is this over sqrt(n): the MAD
+# is 37% efficient against the standard deviation, whose relative error is 1 / sqrt(2 n)
+MAD_RELATIVE_ERROR = 1.167
+# A scatter over its noise is a correction when it stands this many standard errors above 1
+SIGNIFICANCE = 3.0
 
 
 @dataclass(frozen=True)
@@ -55,15 +60,131 @@ class GainDiagnostics:
     xy_phase_over_noise :
         Robust X - Y phase scatter over its noise, for tables that solve each polarization: well
         above 1 when solving them separately (gaintype G) is justified
+    solutions :
+        Number of solutions the scatters are measured on, which decides how far above 1 a scatter
+        must be to be a correction (above_noise); None in records written before it was kept
     """
     phase_over_noise: float
     amplitude_over_noise: Optional[float] = None
     outlying_antennas: Tuple[str, ...] = ()
     xy_amplitude: Optional[float] = None
     xy_phase_over_noise: Optional[float] = None
+    solutions: Optional[int] = None
 
     def __post_init__(self):
         object.__setattr__(self, "outlying_antennas", tuple(self.outlying_antennas))
+
+    def above_noise(self, ratio: float) -> Optional[bool]:
+        """
+        Whether a scatter over its noise, one of this table's, stands above what noise alone gives
+        on this many solutions: more than SIGNIFICANCE standard errors of a MAD scatter above 1.
+        None when the number of solutions is unknown
+        """
+        if not self.solutions:
+            return None
+        return ratio > 1.0 + SIGNIFICANCE * MAD_RELATIVE_ERROR / math.sqrt(self.solutions)
+
+
+@dataclass(frozen=True)
+class SolutionCoverage:
+    """
+    How completely a round's gains were solved: how many solutions failed, on which antennas, and
+    how many solution intervals kept too few antennas for the gains to be determined
+
+    Parameters
+    ----------
+    solutions :
+        Antenna solutions in the table, one per antenna, solution interval and spectral window
+    failed :
+        Of those, the ones gaincal flagged: below minsnr, or without data. applycal (calflag)
+        flags the data they would have calibrated
+    intervals :
+        Solution intervals, one per time and spectral window
+    short_intervals :
+        Of those, the ones with fewer than min_antennas solved antennas
+    min_antennas :
+        Antennas the step needs per interval: 3 for phases (closure phases), 4 for amplitudes
+        (closure amplitudes)
+    minsnr :
+        The solve's minimum solution S/N
+    failed_antennas :
+        The antennas with failed solutions, most failures first
+    spws :
+        The spectral windows the table has solutions for
+    uncalibrated_spws :
+        Selected spectral windows with unflagged data but no solutions, in a table solved per
+        spectral window: applycal leaves their data uncalibrated, without flagging them
+    empty_spws :
+        The measurement set's other spectral windows without solutions, which hold no unflagged
+        data (e.g. a split that keeps its original ids, or a flagged window): CASA reports them
+        ("no corresponding cal spws"), and nothing is lost
+    """
+    solutions: int
+    failed: int
+    intervals: int
+    short_intervals: int
+    min_antennas: int
+    minsnr: float
+    failed_antennas: Tuple[str, ...] = ()
+    spws: Tuple[int, ...] = ()
+    uncalibrated_spws: Tuple[int, ...] = ()
+    empty_spws: Tuple[int, ...] = ()
+
+    def __post_init__(self):
+        for name in ("failed_antennas", "spws", "uncalibrated_spws", "empty_spws"):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
+
+
+def solution_coverage(caltable: str, min_antennas: int,
+                      minsnr: float) -> Optional[SolutionCoverage]:
+    """
+    The coverage of a gain table's solutions; None if it holds none
+    """
+    with open_table(caltable) as table:
+        if table.nrows() == 0:
+            return None
+        flags = table.getcol("FLAG")  # (polarization, channel, row)
+        times = table.getcol("TIME")
+        spws = table.getcol("SPECTRAL_WINDOW_ID")
+        antennas = table.getcol("ANTENNA1")
+    with open_table(os.path.join(caltable, "ANTENNA")) as antenna_table:
+        names = np.asarray(antenna_table.getcol("NAME"))
+    return cover(flags, times, spws, antennas, names, min_antennas, minsnr)
+
+
+def cover(
+    flags: np.ndarray, times: np.ndarray, spws: np.ndarray, antennas: np.ndarray, names: np.ndarray,
+    min_antennas: int, minsnr: float
+) -> SolutionCoverage:
+    """
+    The coverage from a gain table's columns: flags are (polarization, channel, row). A solution
+    is solved when any of its polarizations or channels is unflagged
+    """
+    solved = ~np.all(flags, axis=(0, 1))
+    intervals = {}
+    for time, spw, antenna, ok in zip(times, spws, antennas, solved):
+        interval = intervals.setdefault((float(time), int(spw)), set())
+        if ok:
+            interval.add(int(antenna))
+    failures = {}
+    for antenna in antennas[~solved]:
+        failures[int(antenna)] = failures.get(int(antenna), 0) + 1
+    return SolutionCoverage(
+        solutions=len(solved),
+        failed=int(np.count_nonzero(~solved)),
+        intervals=len(intervals),
+        short_intervals=sum(
+            len(solved_antennas) < min_antennas for solved_antennas in intervals.values()
+        ),
+        min_antennas=min_antennas,
+        minsnr=float(minsnr),
+        failed_antennas=tuple(
+            str(names[antenna]) if 0 <= antenna < len(names) else str(antenna)
+            for antenna, _ in sorted(failures.items(), key=lambda item: (-item[1], item[0]))
+        ),
+        spws=tuple(sorted({int(spw)
+                           for spw in spws})),
+    )
 
 
 def gain_diagnostics(caltable: str, solves_amplitude: bool) -> Optional[GainDiagnostics]:
@@ -128,6 +249,7 @@ def diagnose(
         outlying_antennas=_outlying_antennas(phases, usable, antenna1, antenna2, names, positions),
         xy_amplitude=xy_amplitude,
         xy_phase_over_noise=xy_phase,
+        solutions=int(np.count_nonzero(usable)),
     )
 
 

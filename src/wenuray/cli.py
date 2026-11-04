@@ -138,16 +138,34 @@ def _log(level: int) -> None:
     logging.getLogger("wenuray").setLevel(level)
 
 
+# Notices CASA's tasks log in every self-calibration, which say nothing about the data (#179):
+# calibration tasks on the old visibility iterator, and the flag versions the run discards
+CASA_NOTICES = ("Forcing use of OLD VisibilityIterator", "Deleting version: wenuray_")
+
+
+def _quiet_casa_notices() -> None:
+    """
+    Keeps CASA_NOTICES out of the terminal and CASA's log (except with --debug); CASA's other
+    messages, warnings and errors among them, still show
+    """
+    from casatasks import casalog
+
+    casalog.filterMsg(list(CASA_NOTICES))
+
+
 def _run(args: argparse.Namespace) -> int:
     from .selfcalibration import GainPlotObserver, LoggingObserver
 
     _log(logging.WARNING if args.quiet else logging.DEBUG if args.debug else logging.INFO)
+    if not args.debug:
+        _quiet_casa_notices()
     selfcal = _load(args)
     observers = [LoggingObserver()] + ([GainPlotObserver()] if args.plots else [])
     result = selfcal.run(observers)
     print(
-        "{0} of {1} rounds accepted; final image {2}".format(
-            len(result.accepted_rounds), len(result.rounds), result.final.image
+        "{0} of {1} steps accepted; final image {2}".format(
+            len(result.accepted_rounds) - 1,
+            len(result.rounds) - 1, result.final.image
         )
     )
     return 0

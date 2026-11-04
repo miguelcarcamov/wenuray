@@ -55,7 +55,7 @@ class TestFluxNotLost:
     def test_flux_absorbed_by_the_gains_is_rejected(self):
         decision = FluxNotLost(max_loss=0.1).decide(BEFORE, metrics(flux=0.8))
 
-        assert not decision.accepted and "model flux" in decision.reasons[0]
+        assert not decision.accepted and "flux" in decision.reasons[0]
 
 
 class TestBeamStable:

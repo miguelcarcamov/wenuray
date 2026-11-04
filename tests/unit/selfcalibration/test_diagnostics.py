@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from wenuray.selfcalibration.diagnostics import GainDiagnostics, diagnose
+from wenuray.selfcalibration.diagnostics import GainDiagnostics, SolutionCoverage, cover, diagnose
 
 SNR = 50.0
 # The noise of a phase relative to the reference antenna, and of an amplitude, at that SNR, for a
@@ -127,3 +127,96 @@ def test_diagnostics_are_read_back_from_their_record():
     )
 
     assert record.gains == GainDiagnostics(3.9, outlying_antennas=("DV15", ))
+
+
+class TestAboveNoise:
+    """#179: whether a scatter over its noise is a correction, on as many solutions as it had."""
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_noise_alone_reads_as_noise(self, seed):
+        diagnostics = diagnose(**table(PHASE_NOISE, ntimes=20, seed=seed), solves_amplitude=False)
+
+        assert diagnostics.solutions == 20 * (NANT - 1)
+        assert diagnostics.above_noise(diagnostics.phase_over_noise) is False
+
+    def test_a_small_correction_on_many_solutions_reads_as_one(self):
+        diagnostics = diagnose(**table(1.5 * PHASE_NOISE, ntimes=50), solves_amplitude=False)
+
+        assert diagnostics.above_noise(diagnostics.phase_over_noise) is True
+
+    def test_the_same_ratio_on_few_solutions_reads_as_noise(self):
+        # 1.5 x noise on 9 solutions is within 3 standard errors (1.167 / 3) of 1
+        assert GainDiagnostics(1.5, solutions=9).above_noise(1.5) is False
+        assert GainDiagnostics(1.5, solutions=900).above_noise(1.5) is True
+
+    def test_records_without_the_count_are_not_judged(self):
+        assert GainDiagnostics(12.0).above_noise(12.0) is None
+
+
+def coverage_columns(nant=4, ntimes=3):
+    flags = np.zeros((1, 1, nant * ntimes), dtype=bool)
+    times = np.repeat(np.arange(ntimes, dtype=float), nant)
+    antennas = np.tile(np.arange(nant), ntimes)
+    return flags, times, np.zeros_like(antennas), antennas
+
+
+class TestCoverage:
+    """#179: how many solutions failed, on which antennas, and which intervals lack antennas."""
+
+    def test_a_complete_table(self):
+        flags, times, spws, antennas = coverage_columns()
+
+        assert cover(flags, times, spws, antennas, NAMES, 3, 3.0) == SolutionCoverage(
+            solutions=12,
+            failed=0,
+            intervals=3,
+            short_intervals=0,
+            min_antennas=3,
+            minsnr=3.0,
+            spws=(0, )
+        )
+
+    def test_failures_are_counted_by_antenna_and_interval(self):
+        flags, times, spws, antennas = coverage_columns()
+        # A2 fails in every interval, A3 in the first: that interval keeps 2 of 4 antennas
+        flags[..., antennas == 2] = True
+        flags[..., (antennas == 3) & (times == 0)] = True
+
+        coverage = cover(flags, times, spws, antennas, NAMES, 3, 3.0)
+
+        assert (coverage.failed, coverage.short_intervals) == (4, 1)
+        assert coverage.failed_antennas == ("A2", "A3")
+
+    def test_each_spectral_window_is_its_own_interval(self):
+        flags, times, spws, antennas = coverage_columns()
+
+        coverage = cover(flags, times, antennas % 2, antennas, NAMES, 3, 3.0)
+
+        # Two antennas per spectral window and time: fewer than the 3 phases need
+        assert (coverage.intervals, coverage.short_intervals) == (6, 6)
+
+
+def test_coverage_is_read_back_from_its_record():
+    from wenuray.selfcalibration.result import RoundRecord
+
+    record = RoundRecord(
+        1,
+        "Phasecal('inf')",
+        "t.cal",
+        "i.image",
+        10.0,
+        1.0,
+        0.1,
+        1.0,
+        solutions={
+            "solutions": 12,
+            "failed": 1,
+            "intervals": 3,
+            "short_intervals": 0,
+            "min_antennas": 3,
+            "minsnr": 3.0,
+            "failed_antennas": ["A2"]
+        }
+    )
+
+    assert record.solutions == SolutionCoverage(12, 1, 3, 0, 3, 3.0, ("A2", ))

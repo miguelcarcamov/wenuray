@@ -15,7 +15,7 @@ from wenuray.selfcalibration.loop import Selfcal
 from wenuray.selfcalibration.preflight import read_sample
 from wenuray.selfcalibration.steps import Phasecal
 from wenuray.testing import simulate_point_source_ms
-from wenuray.utils.selfcal_utils import get_spw_ids, open_table
+from wenuray.utils.selfcal_utils import get_spw_ids, open_table, spws_with_unflagged_data
 
 IMAGER = Tclean(ImageGeometry(imsize=128, cell="1arcsec"), niter=200, nsigma=3.0)
 SOLVE = SolveOptions(refant="A0", minblperant=3, combine="spw")
@@ -143,3 +143,28 @@ def test_the_solution_snr_counts_the_channels_of_the_spectral_windows_with_data(
     IMAGER.image(ImagingRequest(ms, str(tmp_path / "model")))
 
     assert read_sample(ms, Selection()).channels == (1, )
+
+
+def test_only_spectral_windows_with_unflagged_data_are_found(ms_with_a_flagged_spw):
+    # Spw 0 holds no data, spw 1 only flagged data
+    assert spws_with_unflagged_data(ms_with_a_flagged_spw, [0, 1, 2]) == [2]
+
+
+def test_spws_without_solutions_but_without_data_are_harmless(ms_with_a_flagged_spw, tmp_path):
+    """
+    #179: solved per spectral window, the table has solutions for spw 2 only. CASA's applycal
+    reports spws 0 and 1 ("no corresponding cal spws"), but they hold no unflagged data, so
+    nothing is left uncalibrated and nothing is warned about
+    """
+    result = Selfcal(
+        ms_with_a_flagged_spw,
+        IMAGER, [Phasecal("inf")],
+        solve=SolveOptions(refant="A0", minblperant=3),
+        output=str(tmp_path / "per_spw")
+    ).run()
+
+    coverage = result.rounds[1].solutions
+    assert coverage.spws == (2, )
+    assert coverage.empty_spws == (0, 1)
+    assert coverage.uncalibrated_spws == ()
+    assert result.rounds[1].findings == ()

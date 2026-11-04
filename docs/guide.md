@@ -127,12 +127,76 @@ works, so a long round shows what it is doing:
 23:29:58 INFO    Pyralysis LBFGS-B: iteration 1, objective 0.41353077
 23:30:04 INFO    Pyralysis LBFGS-B: iteration 10, objective 0.059638306
 23:30:21 INFO    Round 1/2 Phasecal('inf'): imaging with Pyralysis: done in 29 s
-23:30:21 INFO    Round 1 Phasecal('inf') - PSNR: 57.612, ... - accepted: PSNR 19.797 -> 57.612
 ```
 
-`--quiet` keeps the warnings only; `--debug` adds the details, e.g. all of Pyralysis's output. CASA
-logs on its own, e.g. `clearcal::calibrater::setvi ... Forcing use of OLD VisibilityIterator`, a
-notice every calibration task gives.
+Each round then ends with a block that says what was solved and how well, what the gains corrected,
+what the image shows and why the round was kept or not (#179). From a run on simulated data:
+
+```text
+12:25:26 INFO    Round 2/3 Phasecal('120s'): accepted
+  solutions  480 solutions over 60 intervals, all with S/N above 3
+  gains      phase scatter 1.9 x noise: a correction
+  image      PSNR 422.9 (+27.8% on round 1), rms 1.7 mJy/beam (2.78 x thermal), model flux 2.022 Jy
+  decision   accepted: PSNR 331.0 -> 422.9; every interval >= 3 antennas
+12:26:26 INFO    Round 3/3 AmpPhasecal('inf'): accepted
+  solutions  8 solutions over 1 interval, all with S/N above 3
+  gains      phase scatter 4.3 x noise: a correction; amplitude scatter 1.1 x noise: consistent with noise on 7 solutions
+  image      PSNR 472.5 (+11.8% on round 2), rms 1.57 mJy/beam (2.57 x thermal), model flux 1.906 Jy
+  decision   accepted: PSNR 422.9 -> 472.5; every interval >= 4 antennas; flux -5.7% (limit -10%)
+```
+
+- **solutions**: the antenna solutions gaincal found, one per antenna, interval and spectral
+  window. A solution fails when its S/N is below `minsnr` or it has no data, and `applycal`
+  (calflag) then flags the data it would have calibrated; the block names the antennas that
+  failed most. An interval with fewer antennas than the step needs, 3 for phases (closure phases)
+  and 4 for amplitudes (closure amplitudes), leaves its gains undetermined.
+
+  A table solved per spectral window can lack whole windows. CASA's applycal then prints
+  `The following MS spws have no corresponding cal spws in round4_ap.cal: 0 1 2 ...`, and the
+  block says which case it is. Windows without unflagged data, e.g. those a split keeps by their
+  original ids (ALMA's data in 13, 15, 17, 19 of 0-20), lose nothing: "spws 0-12, 14, 16, 18, 20
+  hold no unflagged data: CASA's "no corresponding cal spws" about them is harmless". A selected
+  window with unflagged data but no solutions is left uncalibrated, not flagged, by applycal,
+  and enters the image so; Wenuray warns about it.
+- **gains**: the scatter of the solutions over their own noise, from their S/N. About 1 means the
+  round corrected nothing beyond noise; "a correction" means it stands more than 3 standard
+  errors above 1, on as many solutions as the table has: on few solutions, e.g. 7 in one
+  interval of 8 antennas, even 2 x noise can be chance. Above, the amplitudes of round 3 are
+  consistent with noise: that step added nothing the phases hadn't.
+- **image**: the peak S/N and its change on the last accepted round, the residual noise against
+  the thermal noise from the data, and the model's flux.
+- **decision**: each acceptance rule and its result: the PSNR must rise, every interval must keep the
+  antennas the step needs, and an amplitude step may not take more of the model's flux than its
+  limit. A round rejected for lack of S/N in its
+  solutions adds a hint, e.g. a longer `solint` or `combine = "spw"`.
+
+At the end, a table of every round and the final image:
+
+```text
+12:26:26 INFO    Self-calibration finished in 3 min 35 s: 3 of 3 steps accepted
+  Round  Step                PSNR   rms/thermal  Model flux  Gains/noise  Decision
+  0      initial image       301.9  3.58         2.31 Jy     -            accepted
+  1      Phasecal('inf')     331.0  3.39         2.217 Jy    3.2          accepted
+  2      Phasecal('120s')    422.9  2.78         2.022 Jy    1.9          accepted
+  3      AmpPhasecal('inf')  472.5  2.57         1.906 Jy    4.3 / 1.1    accepted
+Final image: run/round3.image (round 3), PSNR 472.5, rms 2.57 x thermal
+```
+
+`selfcal.toml` records the same for each round (`solutions`, `gains`).
+
+`--quiet` keeps the warnings only; `--debug` adds the details, e.g. all of Pyralysis's output.
+
+CASA writes to the terminal on its own, alongside Wenuray's log. `wenuray run` keeps out two
+notices every self-calibration gets, which say nothing about the data:
+`Forcing use of OLD VisibilityIterator`, which every calibration task gives, and
+`Deleting version: wenuray_selfcal_round...`, the flag versions the run discards when it ends.
+`--debug` shows them. Everything else CASA says still shows, warnings and errors among them; a
+few that look alarming and aren't:
+
+- `The contents of measurespath do not appear to be casarundata`: CASA's measures data aren't
+  where its configuration says, often a `HOME` without `~/.casa/config.py`. CASA still works if
+  it finds them elsewhere; see [Installation](installation.md).
+- `The following MS spws have no corresponding cal spws in ...`: see the solutions line above.
 
 `preset = "group.toml"` lays a recipe over another TOML file, e.g. the solve options and imager
 settings your group shares: tables merge key by key and the recipe wins. Wenuray ships no presets,
