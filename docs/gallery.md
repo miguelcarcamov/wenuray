@@ -28,19 +28,20 @@ with the reasoning behind each value.
 
 | Scenario | Target | Phase errors | Peak S/N with tclean | Peak S/N with Pyralysis |
 | --- | --- | --- | --- | --- |
-| MeerKAT · 816 MHz · up to 8 km | a giant radio galaxy and field sources | 33° → 6° | 106 → **719** (722) | 33 → **240** (273) |
-| VLA D · 1.5 GHz · up to 1 km | a nearby spiral galaxy | 19° → 4° | 127 → **443** (435) | 74 → **466** (437) |
-| VLA A · 1.5 GHz · up to 36 km | a powerful radio galaxy, Cygnus A-like | 53° → 8° | 53 → **688** (659) | 32 → **653** (667) |
-| VLA D · 45 GHz · up to 1 km | compact HII regions in a star-forming region | 40° → 5° | 119 → **826** (826) | 73 → **860** (866) |
-| VLA A · 45 GHz · up to 36 km | a young star's disk at 7 mm | 87° → 21° | 37 → **629** (674) | 18 → **604** (737) |
-| ALMA C-3 · 100 GHz · up to 500 m | filaments meeting in a hub of dense cores | 21° → 5° | 161 → **566** (555) | 105 → **599** (582) |
-| ALMA C-8 · 100 GHz · up to 8.5 km | a protoplanetary disk with rings and gaps | 58° → 12° | 100 → **997** (1007) | 64 → **1514** (1555) |
-| ALMA C-3 · 345 GHz · up to 500 m | a gravitationally lensed dusty galaxy | 41° → 7° | 85 → **711** (701) | 66 → **777** (771) |
-| ALMA C-8 · 345 GHz · up to 8.5 km | a protoplanetary disk with rings, gaps and spiral arms | 75° → 23° | 57 → **937** (951) | 28 → **945** (1268) |
+| MeerKAT · 816 MHz · up to 8 km | a giant radio galaxy and field sources | 33° → 6.6° / 5.6° | 83 → **1786** (1851) | 122 → **1704** (1806) |
+| VLA D · 1.5 GHz · up to 1 km | a nearby spiral galaxy | 19° → 3.7° / 4.1° | 87 → **486** (489) | 87 → **611** (584) |
+| VLA A · 1.5 GHz · up to 36 km | a powerful radio galaxy, Cygnus A-like | 53° → 9.1° / 8.2° | 40 → **815** (815) | 39 → **861** (909) |
+| VLA D · 45 GHz · up to 1 km | compact HII regions in a star-forming region | 40° → 5.2° / 5.2° | 90 → **852** (846) | 98 → **1091** (1103) |
+| VLA A · 45 GHz · up to 36 km | a young star's disk at 7 mm | 87° → 20° / 23° | 21 → **625** (766) | 23 → **638** (1006) |
+| ALMA C-3 · 100 GHz · up to 500 m | filaments meeting in a hub of dense cores | 21° → 5.1° / 5.3° | 121 → **732** (716) | 125 → **761** (746) |
+| ALMA C-8 · 100 GHz · up to 8.5 km | a protoplanetary disk with rings and gaps | 58° → 12° / 12° | 82 → **1501** (1574) | 84 → **2319** (2257) |
+| ALMA C-3 · 345 GHz · up to 500 m | a gravitationally lensed dusty galaxy | 41° → 7.3° / 7.2° | 84 → **1068** (1036) | 81 → **1002** (1011) |
+| ALMA C-8 · 345 GHz · up to 8.5 km | a protoplanetary disk with rings, gaps and spiral arms | 75° → 23° / 23° | 50 → **1284** (1532) | 44 → **2120** (2277) |
 
 Phase errors: the injected antenna phases relative to the reference antenna, rms, and those left
-after self-calibration (with tclean; Pyralysis's are within a degree). Peak S/N: before → **after**
-(without gain errors), each imager against its own ideal image.
+after self-calibration with tclean / Pyralysis. Peak S/N: before → **after** (without gain
+errors), each imager against its own ideal image. Compare each imager with its own ideal, not with
+the other's: their noise differs (below), and so, but for MeerKAT, do their beams.
 
 **Each array observes a target typical for its band**: a giant radio galaxy among background
 sources for MeerKAT; a spiral galaxy and a Cygnus A-like radio galaxy at 1.5 GHz; HII regions and a
@@ -68,13 +69,103 @@ equation.
 
 **The self-calibration is the same everywhere**: phase solutions over the whole observation, then
 over two minutes, then every 30 s integration, and last amplitude-and-phase solutions over five
-minutes, with the antenna nearest the array's centre as reference. Both imagers use Briggs weighting
-(robust 0.5) on a 512-pixel grid with an `"auto"` cell, about five pixels per beam:
+minutes, with the antenna nearest the array's centre as reference. Both imagers use natural weighting,
+the most sensitive, so their images compare like for like, on a 512-pixel grid with an `"auto"`
+cell, about five pixels per beam:
 
 - **tclean**: multiscale CLEAN (point sources, one and three beams) with an automatic mask.
 - **Pyralysis**: χ² with a small total squared variation, optimised with L-BFGS-B, inside a mask.
-  The mask is tclean's last one grown by a beam, as one would draw CLEAN boxes after a first look at
-  the field: a model free in every pixel could absorb the gain errors self-calibration should solve.
+
+```{important}
+**Pyralysis's mask comes from tclean.** It is the mask of tclean's last round in the same
+scenario, grown by a beam, and Pyralysis uses it from its first round on. So Pyralysis starts
+knowing where the emission is, which tclean only found by the end of its own self-calibration: its
+first rounds are helped, and the two imagers don't start from the same knowledge.
+
+Pyralysis needs a mask. Without one, its model, free and positive in every pixel, absorbs the gain
+errors and the noise. On the 45 GHz VLA D scenario, its image before self-calibration already had a
+peak S/N of 445, against tclean's 90, and 11° of phase error was left after self-calibration,
+against 5° with this mask. A mask derived from the data each round, e.g. from the dirty image above
+its noise and sidelobes, grown by a beam, would make Pyralysis independent of tclean; until then,
+the gallery uses tclean's.
+```
+
+```{note}
+**Pyralysis fits part of the noise inside its mask.** Its model is free in every masked pixel, so
+it takes up the noise there too: its residual inside the mask is 0.1 to 0.7 times the thermal
+noise, and on the extended arrays, whose sidelobes carry that fit beyond the mask, 0.6 to 0.8
+times it outside. CLEAN's residual is 1.3 to 3 times the thermal noise inside its mask, where it
+leaves deconvolution errors, and the thermal noise outside. So Pyralysis's peak S/N is higher than
+tclean's on the same data, and its ideal image's too: the noise it reports is lower than the
+data's. Wenuray doesn't know Pyralysis's mask yet, so it can't measure the noise outside it
+([#167](https://github.com/miguelcarcamov/wenuray/issues/167)).
+
+| Residual noise over the thermal noise | tclean, in / out of the mask | Pyralysis, in / out of the mask |
+| --- | --- | --- |
+| MeerKAT · 816 MHz | 1.65 / 1.06 | 0.74 / 1.07 |
+| VLA D · 1.5 GHz | 1.36 / 1.02 | 0.20 / 0.80 |
+| VLA A · 1.5 GHz | 1.30 / 1.03 | 0.33 / 0.98 |
+| VLA D · 45 GHz | 1.46 / 1.01 | 0.10 / 0.80 |
+| VLA A · 45 GHz | 2.47 / 1.27 | 0.21 / 1.23 |
+| ALMA C-3 · 100 GHz | 1.37 / 0.99 | 0.49 / 0.96 |
+| ALMA C-8 · 100 GHz | 2.75 / 1.05 | 0.13 / 0.61 |
+| ALMA C-3 · 345 GHz | 1.88 / 1.03 | 0.51 / 1.01 |
+| ALMA C-8 · 345 GHz | 3.20 / 1.23 | 0.11 / 0.66 |
+
+The noise is the MAD standard deviation of each self-calibrated image's residual, in the mask
+Pyralysis used (tclean's, grown by a beam) and outside it, over that of tclean's ideal residual
+outside the mask, the thermal noise.
+```
+
+### Where each imager grids
+
+Neither imager computes the Fourier transform of its model visibility by visibility, as a direct
+sum would; both go through a padded grid and an FFT, and how accurately they interpolate between the
+grid and the visibilities decides how faithful their models and residuals are.
+
+| Step | tclean | Pyralysis |
+| --- | --- | --- |
+| Fitting the model | Major cycles: the residual visibilities gridded into a dirty image, CLEANed in the image | χ² **on the visibilities** (row by row), never gridded |
+| Predicting the model's visibilities (and, for Pyralysis, the χ² gradient) | FFT of the model on a grid padded by 1.2, degridded with a prolate spheroidal kernel 7 cells wide, tabulated 100 times per cell | FFT of the model on a padded grid, interpolated at each visibility: by default bilinearly, on a grid padded by 1.2 |
+| Residual image | The residual visibilities gridded with the same kernel | The residual visibilities gridded, by Pyralysis 3.3.0 always without a kernel on a grid padded by 1.2 |
+| Restored image | The model convolved with a Gaussian fitted to the PSF's main lobe, plus the residual image | The same, with a Gaussian from the second moments of the weighted uv coverage |
+
+CASA's kernel is within 0.02% of the exact dirty image. Pyralysis's defaults are off by a few
+percent of the peak around bright emission ([clirai/pyralysis#414](https://gitlab.com/clirai/pyralysis/-/work_items/414)):
+the model, fitted through that prediction, makes up for it, and its residual image shows bowls
+around bright emission. So the gallery sets Pyralysis's prediction to a Gaussian-sinc kernel
+tabulated 8 times per cell, on a grid padded by 2 (`estimator="degridding"`,
+`ckernel="gaussian-sinc"`, `ckernel_oversampling=8`, `padding_factor=2.0`), within 0.06% of the
+exact dirty image. Pyralysis's options build kernels 3 cells wide only, which leaves its prolate
+spheroidal kernel, tclean's, less accurate than this one. Pyralysis 3.3.0 grids its residual image
+with its defaults whatever these options say, so the gallery rebuilds each round's residual and
+restored images from the round's model with the same kernel and padding
+([`restore_pyralysis.py`](https://github.com/miguelcarcamov/wenuray/blob/development/examples/gallery/restore_pyralysis.py)).
+The round's noise and peak S/N in the figures are the rebuilt images'; the self-calibration's
+decisions were taken on Pyralysis's own. The rebuilt images come from a copy of the data,
+calibrated round by round as the run did; where a round's solutions failed and flagged data, the
+copy's flags differ from the run's by those few percent of the data.
+
+The two imagers' beams differ too. The moments' Gaussian is the one that matches the PSF's
+curvature at its peak, which the longest baselines decide; CASA's follows the main lobe down to
+its sidelobes. They agree to a few percent where the PSF is close to a Gaussian (the VLA's, ALMA's
+compact configurations), but MeerKAT's PSF, a narrow core on broad shoulders from its dense core of
+antennas, gives Pyralysis a beam half the size of CASA's on each axis, and ALMA's long
+configurations one 20% smaller. Pyralysis 3.3.0's position angles are also about 90° from CASA's.
+A smaller beam gives a lower peak in Jy/beam over the same noise, so for MeerKAT the gallery
+restores Pyralysis's images with tclean's beam of the same round (`tclean_beam = true` in
+`scenarios.toml`), and their peak S/N compare; elsewhere it keeps Pyralysis's own beam. The beam
+does not touch the model or the residual image, nor the self-calibration.
+
+To use the same gridding in your runs, pass these options to the imager:
+
+```python
+Pyralysis(geometry, weighting, terms=[...], optimizer="lbfgsb",
+          estimator="degridding", ckernel="gaussian-sinc", ckernel_oversampling=8,
+          padding_factor=2.0)
+```
+
+Its residual images keep Pyralysis's own gridding until Pyralysis grids them with these options.
 
 ## The results
 
@@ -86,12 +177,20 @@ a perfect calibration reaches), with tclean (circles) and Pyralysis (squares). R
 phase errors injected, and those left after self-calibration.
 ```
 
-Every scenario reaches its ideal image with tclean, to within its noise (within 7% of the ideal's
-peak S/N). With Pyralysis, two fall short: the young star's disk at 45 GHz and the spiral disk at
-345 GHz end with 1.2 and 1.4 times the ideal noise, the latter's reconstruction not having converged
-in its 100 iterations. At 45 GHz and 345 GHz on the longest baselines, about 20° of phase is left:
-mostly the noise of solutions every 30 s at those frequencies, not error left uncorrected, as the
-images show.
+Both imagers leave the same phase errors, within a degree or two, in every scenario: the
+self-calibration doesn't depend on the imager. Six scenarios reach their ideal image with both, to
+within 5% of its peak S/N (MeerKAT and the 1.5 GHz VLA A with Pyralysis to within 6%). Three
+don't, the three with the most phase error at the longest baselines:
+
+- **The young star's disk, VLA A at 45 GHz**, ends at 82% of the ideal's peak S/N with tclean and
+  63% with Pyralysis, with about 20° of phase left. Its errors, 87° rms drifting over two
+  minutes, are more than four steps of solutions remove on a source this faint per integration: a
+  longer schedule, or solutions combined over spectral windows, would go further.
+- **The disks with ALMA C-8**, at 100 and 345 GHz, end at 95% and 84% of the ideal with tclean,
+  and within 3% and 7% with Pyralysis. The 12° and 23° left are mostly the noise of solutions
+  every 30 s at those frequencies, not error left uncorrected, as the images show. At 345 GHz,
+  CLEAN leaves rings around the disk's rings in its residual, 1.2 times the ideal's noise outside
+  the mask, which its ideal image doesn't have.
 
 ```{figure} _static/gallery/convergence.png
 :alt: Image noise against the ideal image's, round by round, per scenario
@@ -104,7 +203,8 @@ drift, and those every integration the rest, which brings every scenario to its 
 ## Each scenario
 
 Each figure shows the image before self-calibration, after it, and without gain errors, with their
-residuals below on one scale (±6σ of the ideal residual), first with tclean, then with Pyralysis.
+residuals below on one scale (±6σ of the ideal image's noise, measured with the source masked),
+first with tclean, then with Pyralysis.
 
 ```{figure} _static/gallery/meerkat-uhf.webp
 :alt: MeerKAT at 816 MHz, a giant radio galaxy and field sources, with tclean

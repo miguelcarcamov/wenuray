@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from pyralysis_simulation import Observation, simulate, target  # noqa: E402
 from skies import Scale, build  # noqa: E402
 
-DESCRIBING = ("name", "title", "subtitle", "sky", "about")
+DESCRIBING = ("name", "title", "subtitle", "sky", "about", "tclean_beam")
 
 
 def scenario(path: str, name: str) -> tuple:

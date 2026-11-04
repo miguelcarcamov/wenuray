@@ -7,6 +7,8 @@ symmetric scale; a beam ellipse and a scale bar on every image; the same colours
 Needs matplotlib (pip install "wenuray[plots]") and CASA, and the files pyralysis_simulation.py
 writes next to each observation (<ms>.ideal, <ms>.gains.npz).
 """
+import dataclasses
+import json
 import math
 import os
 from dataclasses import dataclass
@@ -19,19 +21,29 @@ from wenuray.selfcalibration import SelfcalResult
 from wenuray.utils.image_utils import read_image
 from wenuray.utils.selfcal_utils import open_table
 
-BEFORE, AFTER, IDEAL = "#d1495b", "#00798c", "#30343f"
+BEFORE, AFTER, IDEAL = "#d1495b", "#00798c", "#7b8496"
+# Text and axes: mid grey, legible on white and on a dark page
+GREY = "#808080"
 
 
 def style() -> None:
     """
-    The figures' look: clean axes, readable sizes, white backgrounds
+    The figures' look: clean axes, readable sizes, transparent backgrounds, and text and axes in a
+    grey that reads on the documentation's light and dark themes alike
     """
     import matplotlib as mpl
 
     mpl.rcParams.update(
         {
-            "figure.facecolor": "white",
-            "savefig.facecolor": "white",
+            "figure.facecolor": "none",
+            "axes.facecolor": "none",
+            "savefig.facecolor": "none",
+            "savefig.transparent": True,
+            "text.color": GREY,
+            "axes.labelcolor": GREY,
+            "axes.edgecolor": GREY,
+            "xtick.color": GREY,
+            "ytick.color": GREY,
             "savefig.bbox": "tight",
             "savefig.dpi": 120,
             "font.size": 10,
@@ -188,9 +200,15 @@ def arcsec_label(length: float) -> str:
 
 
 def colorbar(figure, shown, axes, label: str) -> None:
+    """
+    A colour bar right of a row of image panels, exactly as tall as the images: its axes are fixed
+    to the last panel's, which an image's equal aspect sizes
+    """
     from matplotlib.ticker import MaxNLocator
 
-    bar = figure.colorbar(shown, ax=axes, label=label, shrink=0.85, pad=0.02)
+    bar = figure.colorbar(shown, cax=axes[-1].inset_axes([1.04, 0.0, 0.045, 1.0]), label=label)
+    bar.outline.set_edgecolor(GREY)
+    bar.ax.grid(False)
     low, high = shown.norm.vmin, shown.norm.vmax
     bar.set_ticks([tick for tick in MaxNLocator(5).tick_values(low, high) if low <= tick <= high])
 
@@ -217,14 +235,15 @@ def image_norm(panels: Sequence[Panel]):
     return PowerNorm(0.5, vmin=0.0, vmax=peak, clip=True)
 
 
-def residual_norm(reference: Panel, sigmas: float = 6.0):
+def residual_norm(noise: float, sigmas: float = 6.0):
     """
-    A symmetric scale of sigmas times the reference residual's noise (MAD standard deviation)
+    A symmetric scale of sigmas times noise, in Jy/beam: the ideal image's, measured over the whole
+    image with the source masked. The noise of a panel would follow what the model fits there: a
+    model free inside its mask, as Pyralysis's, also fits the noise around the source
     """
-    from astropy.stats import mad_std
     from matplotlib.colors import Normalize
 
-    limit = sigmas * float(mad_std(reference.data, ignore_nan=True))
+    limit = sigmas * noise * 1e3
     return Normalize(-limit, limit, clip=True)
 
 
@@ -241,9 +260,17 @@ def image_ideal(ms: str, imager: Imager, result: SelfcalResult, output: str) -> 
         imager = imager.with_overrides(
             geometry=ImageGeometry(imsize=tuple(grid["imsize"]), cell=grid["cell"])
         )
+    # Imaged once: redrawing the figures reuses it
+    record = output + "/ideal.json"
+    if os.path.exists(record):
+        with open(record) as file:
+            return ImagingResult(**json.load(file))
     # The ideal copy has no CORRECTED_DATA yet; equal to DATA, it is what the imager images
     clearcal(vis=ms + ".ideal", addmodel=False)
-    return imager.image(ImagingRequest(ms + ".ideal", output + "/ideal"))
+    ideal = imager.image(ImagingRequest(ms + ".ideal", output + "/ideal"))
+    with open(record, "w") as file:
+        json.dump(dataclasses.asdict(ideal), file)
+    return ideal
 
 
 def residual_path(image: str) -> str:
@@ -307,7 +334,7 @@ def before_after(
     for axis, panel, label, corner in zip(axes[0], images, labels, corners):
         shown = draw(axis, panel, norm, "magma", label, corner)
     colorbar(figure, shown, axes[0], "mJy/beam")
-    scale = residual_norm(residuals[2])
+    scale = residual_norm(floor)
     for axis, panel, corner in zip(axes[1], residuals, noise):
         shown = draw(axis, panel, scale, "RdBu_r", "Residual", corner)
     colorbar(figure, shown, axes[1], "mJy/beam (±6σ of the ideal)")
