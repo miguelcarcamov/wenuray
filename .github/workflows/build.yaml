@@ -1,8 +1,11 @@
 name: build
 
 on:
+  # Pushes to master too: a release merge then saves the CASA data cache that later pull requests
+  # into master restore, as a pull request reads only its own, its base's and the default
+  # branch's caches (#184)
   push:
-    branches: [development]
+    branches: [development, master]
   pull_request:
     branches:
     - development
