@@ -14,6 +14,9 @@
 # baseline length (as the phase structure function, about B^0.5, up to its outer scale);
 # - amplitude errors grow with frequency (pointing and opacity).
 # The values are this gallery's, chosen to be typical, not measured.
+#
+# tclean_beam = true restores Pyralysis's images with tclean's beam, where Pyralysis's own (from the
+# uv moments) is far from it (docs/gallery.md).
 
 [[scenario]]
 name = "meerkat-uhf"
@@ -30,6 +33,7 @@ amplitude_error = 0.02
 declination = "-30d00m00s"
 seed = 101
 coherence_time = 600.0
+tclean_beam = true  # a narrow core on broad shoulders: half the beam in uv moments
 
 [[scenario]]
 name = "vla-l-d"
