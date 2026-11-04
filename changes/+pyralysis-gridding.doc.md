@@ -1,1 +1,0 @@
-The Imagers page explains how Pyralysis predicts visibilities and grids its residual image, with options for accurate gridding (clirai/pyralysis#414), and that a weakly regularised model fits the noise inside its mask.
