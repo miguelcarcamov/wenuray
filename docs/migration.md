@@ -49,7 +49,7 @@ split(vis=result.ms, outputvis="target_sc/selfcal.ms", datacolumn="corrected")
 
 | snow < 1.0 | Wenuray 1.0 |
 | --- | --- |
-| `Phasecal(visfile=..., imager=..., solint=["inf", "60s"], ...)` | `Selfcal(ms, imager, [Phasecal("inf"), Phasecal("60s")])` |
+| `Phasecal(visfile=..., imager=..., solint=["inf", "60s"], ...)` | `Selfcal(ms, imager, [Phasecal("inf"), Phasecal("60s")])`, or, with the solints from the data, `[Phasecal("inf"), Repeat(Phasecal("auto"))]` (1.3) |
 | `previous_selfcal=phscal` | one schedule with all the steps, or `Selfcal.resume(result, imager, steps)` |
 | `input_caltable="pcal", spwmap=[...]` | `initial_stack=CalStack([CalTable("pcal", "p", spwmap)])` |
 | `refant`, `minblperant`, `minsnr`, `gaintype`, `combine` | `solve=SolveOptions(...)`; a step overrides them with `solve={...}` |

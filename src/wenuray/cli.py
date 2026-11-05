@@ -51,15 +51,15 @@ weighting = { weighting = "natural" }
 
 [[steps]]                      # one round each, in order
 type = "phase"                 # "phase", "amp" or "ampphase"
-solint = "inf"
+solint = "inf"                 # or a time, e.g. "60s", or "auto": the shortest the S/N supports
 
-[[steps]]
-type = "phase"
-solint = "60s"
+[[steps]]                      # the phase step again at shorter "auto" solints, round by round,
+type = "repeat"                # until its corrections are at the noise
+step = { type = "phase", solint = "auto" }
 
 # [[steps]]
 # type = "ampphase"            # amplitude steps need a phase solution before them
-# solint = "inf"
+# solint = "auto"
 # imaging = { nsigma = 2.0 }   # this round's imager options
 '''
 

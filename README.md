@@ -132,8 +132,30 @@ imaging = { threshold = "0.025mJy" }
 ```
 
 Three rounds: a phase solution over the whole scan, combining spectral windows for S/N; a shorter
-one, now that the model is better; and finally amplitudes and phases, cleaned deeper. Check it,
-then run it:
+one, now that the model is better; and finally amplitudes and phases, cleaned deeper.
+
+Or let the data choose the solints. `solint = "auto"` takes, when its round starts, the shortest
+solint whose predicted S/N reaches twice `minsnr`, and a `repeat` runs a phase step again at
+shorter solints until its corrections are at the noise:
+
+```toml
+[[steps]]
+type = "phase"
+solint = "inf"
+solve = { combine = "spw" }
+
+[[steps]]
+type = "repeat"
+step = { type = "phase", solint = "auto", solve = { combine = "spw" } }
+
+[[steps]]
+type = "ampphase"
+solint = "auto"
+imaging = { threshold = "0.025mJy" }
+```
+
+Each round records the solint it took, e.g. `Phasecal('auto' -> '180s')`
+([Solints from the data](https://wenuray.readthedocs.io/guide.html#solints-from-the-data)). Check it, then run it:
 
 ```bash
 wenuray validate recipe.toml    # builds the run and checks it, without touching the data
@@ -231,6 +253,9 @@ change or run; `selfcal.to_toml(...)` writes it back.
 - **Checks before any I/O.** An invalid schedule raises `ScheduleError` while the run is being
   built. Before each `gaincal`, Wenuray predicts the solution's S/N from the data and tells you the
   shortest solint that would reach `minsnr`.
+- **Solints from the data.** `solint="auto"` takes the shortest solint the predicted S/N supports,
+  sized so that no scan ends in a solution too short for `minsnr`, and `Repeat(Phasecal("auto"))`
+  shortens it round by round, as the model improves, until the corrections are at the noise.
 - **Bookkeeping you don't have to do.** Every accepted table stays applied in later solves, each
   with its own `spwmap` and `interp`, and one `Selection` is used by the solve, the apply and the
   imager.
