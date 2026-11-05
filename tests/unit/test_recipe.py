@@ -13,7 +13,7 @@ from wenuray.imaging.backends.pyralysis import Pyralysis
 from wenuray.recipe import RecipeError
 from wenuray.selfcalibration import (
     AllOf, AmpPhasecal, CalStack, CalTable, Check, EnoughAntennas, FluxNotLost, Phasecal,
-    PSNRImproves, ResidualFlagging, ScheduleError, Selfcal
+    PSNRImproves, Repeat, ResidualFlagging, ScheduleError, Selfcal
 )
 from wenuray.selfcalibration.acceptance import AcceptancePolicy, Decision
 
@@ -119,6 +119,7 @@ class TestRecipeAndScriptAgree:
             ),
             steps=[
                 Phasecal(30.0, solve={"minsnr": 5.0}),
+                Repeat(Phasecal("auto", imaging={"max_iter": 100})),
                 AmpPhasecal("inf", solnorm=False, imaging={"geometry": {
                     "cell": "0.02arcsec"
                 }}),

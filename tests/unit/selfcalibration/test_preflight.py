@@ -47,6 +47,14 @@ def test_the_counts_follow_the_solint_and_combine(solint, combine, gaintype, exp
     assert predict(SAMPLE, Phasecal(solint), options).snr == pytest.approx(expected)
 
 
+def test_amplitude_predictions_are_casas_snr():
+    # gaincal reports the antenna's S/N over sqrt(2) when it solves amplitudes too
+    options = SolveOptions(gaintype="G")
+
+    assert predict(SAMPLE, AmpPhasecal("int"), options).snr == pytest.approx(ONE * 2 / math.sqrt(2))
+    assert predict(SAMPLE, Phasecal("int"), options).snr == pytest.approx(ONE * 2)
+
+
 def test_step_overrides_count():
     prediction = predict(SAMPLE, Ampcal("int", solve={"minsnr": 100.0}), SolveOptions(gaintype="G"))
 
@@ -257,3 +265,76 @@ class TestNoiseFromTheHands:
         assert _hand_differences(block) == {}
         assert _least_raised({"consecutive integrations": (0.05, 1000, {})}) == \
             "consecutive integrations"
+
+
+class TestShortestSolint:
+    """#66: solint="auto" is the shortest solint whose predicted S/N reaches 2 x minsnr."""
+
+    @staticmethod
+    def resolve(noise, combine=""):
+        from wenuray.selfcalibration.preflight import shortest_solint
+        return shortest_solint(
+            dataclasses.replace(SAMPLE, noise=noise), Phasecal("auto"),
+            SolveOptions(gaintype="G", combine=combine)
+        )[0]
+
+    @pytest.mark.parametrize(
+        "noise, solint",
+        [
+            # S/N in one integration: 60, 6 (exactly 2 x minsnr 3), 3
+            (0.1, "int"),
+            (1.0, "int"),
+            (2.0, "40s"),  # 4 integrations of 10 s: 3 x sqrt(4) = 6
+            (10.0, "inf"),  # 1000 s is longer than a scan, whose S/N 4.6 still reaches minsnr
+            (20.0, None),  # a whole scan gives 2.3, below minsnr
+        ]
+    )
+    def test_the_solint_follows_the_noise(self, noise, solint):
+        assert self.resolve(noise) == solint
+
+    def test_combining_scans_allows_solints_longer_than_a_scan(self):
+        # 0.6 per integration: (6 / 0.6)^2 = 100 integrations, 1000 s, within the 3600 s span
+        assert self.resolve(10.0, combine="scan") == "1000s"
+
+    def test_no_scan_ends_in_a_solution_too_short_for_minsnr(self):
+        from wenuray.selfcalibration.preflight import shortest_solint
+        # 7 integrations of 10 s are needed (S/N 6 / sqrt(7) each); a 120-integration scan would
+        # end in a 1-integration solution, below minsnr. 8 integrations divide it into 15
+        sample = dataclasses.replace(SAMPLE, noise=math.sqrt(7), scan_lengths=(1200.0, ))
+
+        solint, why = shortest_solint(sample, Phasecal("auto"), SolveOptions(gaintype="G"))
+
+        assert solint == "80s"
+        assert "8 integrations rather than 7" in why
+
+    def test_what_no_length_can_save_is_reported(self):
+        from wenuray.selfcalibration.preflight import shortest_solint
+        # A 1-integration scan ends short whatever the solint: 1 of 121 integrations
+        sample = dataclasses.replace(SAMPLE, noise=math.sqrt(7), scan_lengths=(1200.0, 10.0))
+
+        solint, why = shortest_solint(sample, Phasecal("auto"), SolveOptions(gaintype="G"))
+
+        assert solint == "80s"
+        assert "0.8% of the integrations still do" in why
+
+    def test_amplitude_solutions_need_sqrt2_more(self):
+        # CASA's S/N for calmode "ap" is the antenna's over sqrt(2): 60 / sqrt(2) in one
+        # integration, so 2 x minsnr 30 = 60 takes 2 integrations
+        assert self.resolve_step(AmpPhasecal("auto", solve={"minsnr": 30.0})) == "20s"
+        assert self.resolve_step(Phasecal("auto", solve={"minsnr": 30.0})) == "int"
+
+    @staticmethod
+    def resolve_step(step):
+        from wenuray.selfcalibration.preflight import shortest_solint
+        return shortest_solint(SAMPLE, step, SolveOptions(gaintype="G"))[0]
+
+    def test_the_steps_minsnr_sets_the_target(self):
+        from wenuray.selfcalibration.preflight import shortest_solint
+        solint, why = shortest_solint(
+            dataclasses.replace(SAMPLE, noise=1.0), Phasecal("auto", solve={"minsnr": 6.0}),
+            SolveOptions(gaintype="G")
+        )
+
+        # Target 12 from 6 per integration: 4 integrations
+        assert solint == "40s"
+        assert "12 (2 x minsnr)" in why

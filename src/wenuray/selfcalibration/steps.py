@@ -4,6 +4,11 @@ holds data and small hooks; what differs between calibration types lives in its 
 calmode branches. The self-calibration loop that runs them comes with #22c.
 
     Phasecal("inf"), Phasecal("60s"), AmpPhasecal("inf", solve={"minsnr": 5.0})
+
+A solint of "auto" is resolved when its round starts, from the data (#66), and Repeat runs a step
+again at shorter solints until its solutions are at the noise:
+
+    Phasecal("inf"), Repeat(Phasecal("auto")), AmpPhasecal("auto")
 """
 from __future__ import annotations
 
@@ -33,6 +38,9 @@ LEGACY_ARGUMENTS = frozenset(
         "flag_mode", "combine", "flag_dataset", "restore_psnr", "subtract_source", "incremental"
     }
 )
+
+# The solint resolved from the data when its round starts (#66)
+AUTO = "auto"
 
 # Units of a CASA solution interval, in seconds
 SOLINT_UNITS = {"s": 1.0, "sec": 1.0, "min": 60.0, "m": 60.0, "h": 3600.0, "hr": 3600.0}
@@ -65,8 +73,11 @@ class Finding:
 def solint_seconds(solint: str) -> float:
     """
     Converts a CASA solution interval to seconds: "inf" is infinite and "int" (one integration)
-    is 0, the shortest possible. Numbers without a unit are seconds.
+    is 0, the shortest possible. Numbers without a unit are seconds. "auto" is not known until its
+    round starts, so it is NaN, which compares false with every length
     """
+    if solint == AUTO:
+        return math.nan
     if solint == "inf":
         return math.inf
     if solint == "int":
@@ -74,8 +85,8 @@ def solint_seconds(solint: str) -> float:
     match = SOLINT_PATTERN.match(solint.lower())
     if match is None or match.group(2) not in SOLINT_UNITS and match.group(2) != "":
         raise ValueError(
-            "Invalid solint {0!r}: use 'inf', 'int', a number of seconds or a number with a unit "
-            "({1})".format(solint, ", ".join(SOLINT_UNITS))
+            "Invalid solint {0!r}: use 'inf', 'int', 'auto', a number of seconds or a number with a "
+            "unit ({1})".format(solint, ", ".join(SOLINT_UNITS))
         )
     return float(match.group(1)) * SOLINT_UNITS.get(match.group(2), 1.0)
 
@@ -89,8 +100,21 @@ def _(solint: Union[int, float]) -> float:
     return float(solint)
 
 
+class ScheduleEntry(ABC):
+    """
+    An entry of a self-calibration schedule: a calibration step, one round, or a Repeat of one
+    """
+
+    @property
+    def steps(self) -> tuple:
+        """
+        The calibration steps the entry runs, in order, as far as is known before the run
+        """
+        return (self, )
+
+
 @dataclass(frozen=True)
-class CalibrationStep(ABC):
+class CalibrationStep(ScheduleEntry):
     """
     One self-calibration round: solve the gains with the step's calibration mode, apply them and
     image the result
@@ -98,7 +122,9 @@ class CalibrationStep(ABC):
     Parameters
     ----------
     solint :
-        Solution interval: "inf", "int", "60s", "10min", or a number of seconds
+        Solution interval: "inf", "int", "60s", "10min", a number of seconds, or "auto": the
+        shortest solint whose predicted solution S/N reaches twice minsnr, resolved from the data
+        when the round starts (#66)
     solve :
         Overrides of the run's SolveOptions for this step only, e.g. {"minsnr": 5.0}
     imaging :
@@ -183,6 +209,19 @@ class CalibrationStep(ABC):
     def solint_seconds(self) -> float:
         return solint_seconds(self.solint)
 
+    @property
+    def is_auto(self) -> bool:
+        """
+        Whether the solint is resolved when the round starts
+        """
+        return self.solint == AUTO
+
+    def with_solint(self, solint: str) -> CalibrationStep:
+        """
+        The step with another solint, e.g. the one "auto" resolved to
+        """
+        return dataclasses.replace(self, solint=solint)
+
     @classmethod
     def default_acceptance(cls) -> AcceptancePolicy:
         """
@@ -221,6 +260,12 @@ class CalibrationStep(ABC):
         selection :
             The data selection shared by the solve, the apply and the imager
         """
+        if self.is_auto:
+            raise ValueError(
+                "{0}('auto') must be resolved from the data before it is solved".format(
+                    type(self).__name__
+                )
+            )
         solint = self.solint if isinstance(self.solint, str) else "{0}s".format(self.solint)
         return {
             **dataclasses.asdict(selection),
@@ -316,3 +361,101 @@ class AmpPhasecal(_AmplitudeStep):
     """
     calmode: ClassVar[str] = "ap"
     solves_phase: ClassVar[bool] = True
+
+
+@dataclass(frozen=True)
+class Repeat(ScheduleEntry):
+    """
+    Runs a step again and again, each round at a shorter solint than the last, as long as the
+    solutions still correct more than their noise (#66). The step's solint is "auto", so each
+    round takes the shortest solint the data support then, against the model the last round left.
+
+    The repeat ends, and the run goes on with the next entry, when:
+
+    - a round's gains are consistent with their noise: shorter solints would only fit noise;
+    - the data support no solint at least min_shortening shorter than the last round's, or the
+      solint is one integration;
+    - a round is rejected, which is rolled back as any other.
+
+    Parameters
+    ----------
+    step :
+        The step to repeat, with solint "auto"
+    min_shortening :
+        How much shorter each round's solint must be than the last, as a fraction: 0.25 means at
+        most 3/4 of it. A better model raises the solution S/N, and the solint the data support
+        shortens as the square of it, so a model a few percent brighter would otherwise buy a round,
+        a whole imaging run, for a solint a few percent shorter. 0 only asks for a shorter one
+    """
+    step: CalibrationStep
+    min_shortening: float = 0.25
+
+    def __post_init__(self):
+        if not isinstance(self.step, CalibrationStep):
+            raise TypeError("Repeat takes a calibration step, not {0!r}".format(self.step))
+        if not self.step.is_auto:
+            raise TypeError(
+                "Repeat shortens the solint round after round, so its step's solint must be "
+                "'auto', not {0!r}".format(self.step.solint)
+            )
+        if not isinstance(self.min_shortening, (int, float)) or isinstance(
+            self.min_shortening, bool
+        ) or not 0.0 <= self.min_shortening < 1.0:
+            raise ValueError(
+                "min_shortening is a fraction from 0 to below 1, not {0!r}".format(
+                    self.min_shortening
+                )
+            )
+
+    @classmethod
+    def from_recipe(cls, table: Mapping) -> Repeat:
+        """
+        Builds the repeat from its recipe table, whose step is a typed table
+        """
+        table = dict(table)
+        if "step" not in table:
+            raise recipe.RecipeError("A repeat needs a step, e.g. step = {type = \"phase\", ...}")
+        table["step"] = recipe.decode("step", table["step"])
+        return cls(**table)
+
+    @property
+    def steps(self) -> tuple:
+        return (self.step, )
+
+    def ends_before(self, last: Optional[CalibrationStep], step: CalibrationStep) -> str:
+        """
+        Why the repeat ends rather than run step after its last round, last; "" if it goes on
+        """
+        if last is None:
+            return ""
+        longest = (1.0 - self.min_shortening) * last.solint_seconds
+        if step.solint_seconds < last.solint_seconds and step.solint_seconds <= longest:
+            return ""
+        return "the data support {0!r}, not a solint at least {1:.0%} shorter than {2!r}".format(
+            step.solint, self.min_shortening, last.solint
+        )
+
+    def ends_after(self, record, step: CalibrationStep) -> str:
+        """
+        Why the repeat ends after the round of step that record describes; "" if it goes on
+        """
+        if not record.accepted:
+            return "its last round was rejected"
+        if _at_noise(record.gains):
+            return "its last round's gains are consistent with their noise"
+        if step.solint == "int":
+            return "its solint is one integration"
+        return ""
+
+
+def _at_noise(gains) -> bool:
+    """
+    Whether a round's gains are consistent with their noise: their phase scatter, and their
+    amplitude scatter if solved, within noise for as many solutions as they have (#181). Unknown
+    when the round has no diagnostics, which counts as not at the noise
+    """
+    if gains is None:
+        return False
+    ratios = [gains.phase_over_noise
+              ] + ([gains.amplitude_over_noise] if gains.amplitude_over_noise is not None else [])
+    return all(gains.above_noise(ratio) is False for ratio in ratios)

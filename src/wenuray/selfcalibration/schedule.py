@@ -12,7 +12,7 @@ from typing import Sequence
 from multimethod import multimethod
 
 from .caltable import CalStack, CalTable
-from .steps import CalibrationStep, Finding, Phasecal, Severity, _AmplitudeStep
+from .steps import CalibrationStep, Finding, Phasecal, ScheduleEntry, Severity, _AmplitudeStep
 
 __all__ = [
     "Finding", "ScheduleError", "ScheduleWarning", "Severity", "check_transition",
@@ -74,15 +74,16 @@ def _(previous: Phasecal, step: _AmplitudeStep, stack: CalStack) -> list:
     return findings
 
 
-def validate_schedule(steps: Sequence[CalibrationStep], stack: CalStack = CalStack()) -> list:
+def validate_schedule(steps: Sequence[ScheduleEntry], stack: CalStack = CalStack()) -> list:
     """
     Simulates the calibration stack through the schedule and checks every step and transition.
-    Errors raise ScheduleError, listing all of them; warnings are emitted as ScheduleWarning.
+    Errors raise ScheduleError, listing all of them; warnings are emitted as ScheduleWarning. A
+    Repeat is checked as its step.
 
     Parameters
     ----------
     steps :
-        The calibration steps, in the order they run
+        The schedule's entries, calibration steps or Repeats, in the order they run
     stack :
         Tables accepted before the schedule starts, e.g. from a previous run
 
@@ -92,20 +93,21 @@ def validate_schedule(steps: Sequence[CalibrationStep], stack: CalStack = CalSta
     """
     if not steps:
         raise ScheduleError("The schedule has no calibration steps")
-    for step in steps:
-        if not isinstance(step, CalibrationStep):
+    for entry in steps:
+        if not isinstance(entry, ScheduleEntry):
             raise ScheduleError(
-                "Schedule entries must be calibration steps such as Phasecal('60s'), not "
-                "{0!r}".format(step)
+                "Schedule entries must be calibration steps such as Phasecal('60s'), or "
+                "Repeat(...), not {0!r}".format(entry)
             )
     findings = []
     previous = None
-    for index, step in enumerate(steps):
+    for index, step in enumerate(step for entry in steps for step in entry.steps):
         findings += [
             Finding(finding.severity, "step {0}: {1}".format(index, finding.message))
             for finding in step.check() + check_transition(previous, step, stack)
         ]
-        # A rejected round stops the run, so each step runs after all earlier ones were accepted
+        # A rejected round stops the run, so each step runs after all earlier ones were accepted.
+        # Within a Repeat it doesn't, and the loop checks the stack again before each step
         stack = stack.push(CalTable("<step {0}>".format(index), step.calmode))
         previous = step
     errors = [finding.message for finding in findings if finding.severity is Severity.ERROR]

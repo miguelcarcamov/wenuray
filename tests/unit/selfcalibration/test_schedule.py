@@ -5,7 +5,7 @@ from wenuray.selfcalibration.caltable import CalStack, CalTable
 from wenuray.selfcalibration.schedule import (
     Finding, ScheduleError, ScheduleWarning, Severity, check_transition, validate_schedule
 )
-from wenuray.selfcalibration.steps import AmpPhasecal, Ampcal, Phasecal
+from wenuray.selfcalibration.steps import AmpPhasecal, Ampcal, Phasecal, Repeat
 
 PHASE_STACK = CalStack([CalTable("pcal", "p")])
 
@@ -100,6 +100,15 @@ class TestValidateSchedule:
     def test_empty_schedule_raises(self):
         with pytest.raises(ScheduleError, match="no calibration steps"):
             validate_schedule([])
+
+    def test_a_repeat_is_checked_as_its_step(self):
+        # #66: the repeated phase solution satisfies the amplitude step after it
+        assert validate_schedule([Repeat(Phasecal("auto")), AmpPhasecal("auto")]) == []
+        with pytest.raises(ScheduleError, match=r"step 0: Ampcal\('auto'\)"):
+            validate_schedule([Repeat(Ampcal("auto"))])
+
+    def test_auto_solints_are_not_compared_before_they_are_known(self):
+        assert validate_schedule([Phasecal("auto"), AmpPhasecal("60s")]) == []
 
     def test_entries_must_be_steps(self):
         with pytest.raises(ScheduleError, match="calibration steps"):

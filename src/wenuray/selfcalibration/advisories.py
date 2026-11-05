@@ -111,9 +111,11 @@ class SolutionSNRBelowMinimum(Advisory):
             return []
         return [
             Finding.warning(
-                "{0}: predicted solution S/N {1:.1f} is below minsnr {2:g}, so gaincal may flag "
-                "most solutions; {3}".format(
-                    context.description, prediction.snr, prediction.minsnr, prediction.advice
+                "{0}: predicted solution S/N {1:.1f}{2} is below minsnr {3:g}, so gaincal may flag "
+                "most solutions; {4}".format(
+                    context.description, prediction.snr,
+                    " (CASA's, the antenna's S/N over sqrt(2) for amplitude solutions)"
+                    if context.step.solves_amplitude else "", prediction.minsnr, prediction.advice
                 )
             )
         ]
