@@ -6,6 +6,8 @@ The wenuray command (#36), a thin layer over the recipes of wenuray.recipe:
     wenuray show selfcal.toml           the recipe with its presets laid in (--defaults: all values)
     wenuray run selfcal.toml            runs it
     wenuray apply out --ms line.ms      applies a run's calibration to other data (#68)
+    wenuray suggest target.ms --imager tclean > selfcal.toml
+                                        a recipe derived from the data, with reasons (#121)
 
 --ms and --output reuse a recipe for another dataset. Errors are the constructors' own, as from
 Python, and exit with status 1.
@@ -107,6 +109,19 @@ def _parser() -> argparse.ArgumentParser:
     apply.add_argument("--applymode", default="calflag", help="applycal's applymode")
     init = commands.add_parser("init", help="write a generic recipe to start from")
     init.add_argument("-o", "--output", help="file to write instead of the standard output")
+    suggest = commands.add_parser(
+        "suggest",
+        help="write a recipe derived from the data, each value with its reason",
+        description="write a recipe derived from the data, each value with its reason (#121)"
+    )
+    suggest.add_argument("ms", help="measurement set with the calibrated target data in DATA")
+    suggest.add_argument("--imager", required=True, choices=("tclean", "pyralysis"))
+    suggest.add_argument(
+        "--resolve",
+        action="store_true",
+        help="write the grid and the solints the data support now, instead of \"auto\""
+    )
+    suggest.add_argument("-o", "--output", help="file to write instead of the standard output")
     return parser
 
 
@@ -236,7 +251,33 @@ def _init(args: argparse.Namespace) -> int:
     return 0
 
 
-COMMANDS = {"run": _run, "validate": _validate, "show": _show, "apply": _apply, "init": _init}
+def _suggest(args: argparse.Namespace) -> int:
+    from .suggest import suggest
+
+    if args.output is None:
+        sys.stdout.write(suggest(args.ms, args.imager, args.resolve))
+        return 0
+    if os.path.exists(args.output):
+        raise FileExistsError("{0} already exists".format(args.output))
+    text = suggest(
+        args.ms,
+        args.imager,
+        args.resolve,
+        relative_to=os.path.dirname(os.path.abspath(args.output))
+    )
+    with open(args.output, "w") as file:
+        file.write(text)
+    return 0
+
+
+COMMANDS = {
+    "run": _run,
+    "validate": _validate,
+    "show": _show,
+    "apply": _apply,
+    "init": _init,
+    "suggest": _suggest,
+}
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

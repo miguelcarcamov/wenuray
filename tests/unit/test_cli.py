@@ -231,3 +231,49 @@ def test_run_keeps_casas_routine_notices_quiet_but_with_debug(
     wenuray(capsys, "run", *flags, recipe)
 
     assert bool(calls) is filtered
+
+
+class TestSuggest:
+    """#121: the command over wenuray.suggest, with the data read mocked"""
+
+    @pytest.fixture
+    def suggested(self, monkeypatch):
+        calls = []
+
+        def fake(ms, imager, resolve=False, relative_to=None):
+            calls.append((ms, imager, resolve, relative_to))
+            return "# suggested\n"
+
+        monkeypatch.setattr("wenuray.suggest.suggest", fake)
+        return calls
+
+    def test_writes_the_suggestion(self, capsys, suggested):
+        result = wenuray(capsys, "suggest", "target.ms", "--imager", "tclean")
+
+        assert result.status == 0
+        assert result.out == "# suggested\n"
+        assert suggested == [("target.ms", "tclean", False, None)]
+
+    def test_to_a_file_with_paths_relative_to_it(self, capsys, suggested, tmp_path):
+        path = tmp_path / "selfcal.toml"
+
+        result = wenuray(
+            capsys, "suggest", "target.ms", "--imager", "pyralysis", "--resolve", "-o", str(path)
+        )
+
+        assert result.status == 0
+        assert path.read_text() == "# suggested\n"
+        assert suggested == [("target.ms", "pyralysis", True, str(tmp_path))]
+
+    def test_does_not_overwrite_a_file(self, capsys, suggested, tmp_path):
+        path = tmp_path / "selfcal.toml"
+        path.write_text("mine")
+
+        result = wenuray(capsys, "suggest", "target.ms", "--imager", "tclean", "-o", str(path))
+
+        assert result.status == 1 and "already exists" in result.err
+        assert path.read_text() == "mine"
+
+    def test_the_imager_is_required(self, capsys):
+        with pytest.raises(SystemExit):
+            cli.main(["suggest", "target.ms"])

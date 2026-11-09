@@ -40,6 +40,8 @@ OUTLIER_Z = 5.0
 # solint="auto" (#66) takes the shortest solint whose predicted S/N reaches this many times minsnr,
 # so that the solutions' own scatter about the prediction leaves most of them above minsnr
 AUTO_SNR_FACTOR = 2.0
+# Where read_sample takes the signal from: the model, or the data before any model exists (#121)
+SIGNAL_FROM = ("model", "data")
 
 
 @dataclass(frozen=True)
@@ -299,12 +301,27 @@ def absorbed_spectrum(
     )
 
 
-def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
+def read_sample(ms: str,
+                selection: Selection,
+                signal_from: str = "model") -> Optional[VisibilitySample]:
     """
     Reads what the estimate needs from the selected data (field and spectral windows; uvrange
     isn't applied). Returns None if the data can't support an estimate: no model, no unflagged
     cross-correlations, or no consecutive integrations
+
+    Parameters
+    ----------
+    signal_from :
+        "model": the signal is the median amplitude of MODEL_DATA, and the noise comes from
+        CORRECTED_DATA (or DATA). "data": before any model exists (#121), the signal is the
+        median over baselines of the visibility amplitude of DATA with the noise taken out,
+        sqrt(<|V|^2> - 2 sigma^2), which phase errors don't lower, as nothing is averaged in phase
     """
+    if signal_from not in SIGNAL_FROM:
+        raise ValueError(
+            "signal_from must be one of {0}, not {1!r}".format(SIGNAL_FROM, signal_from)
+        )
+    from_model = signal_from == "model"
     ms_tool = ms_tool_factory()
     try:
         indices = ms_tool.msseltoindex(vis=ms, field=selection.field, spw=selection.spw)
@@ -316,8 +333,12 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
                             ("DATA_DESC_ID", indices["dd"])) if len(ids)
     ]
     with open_table(ms) as ms_table:
-        if "MODEL_DATA" not in ms_table.colnames():
+        if from_model and "MODEL_DATA" not in ms_table.colnames():
             return None
+        if from_model and "CORRECTED_DATA" in ms_table.colnames():
+            data_column = "CORRECTED_DATA"
+        else:
+            data_column = "DATA"
         selected = ms_table.query(query=" AND ".join(conditions))
         try:
             nrows = selected.nrows()
@@ -330,8 +351,9 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
                 nbaselines = antenna_table.nrows() * (antenna_table.nrows() - 1) // 2
             block_rows = INTEGRATIONS_PER_BLOCK * nbaselines * len(ddids)
             blocks = [
-                _read_block(selected, start, min(block_rows, nrows - start))
-                for start in _block_starts(nrows, block_rows)
+                _read_block(
+                    selected, start, min(block_rows, nrows - start), data_column, from_model
+                ) for start in _block_starts(nrows, block_rows)
             ]
         finally:
             selected.close()
@@ -359,17 +381,25 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         if noise is not None:
             estimates[name] = (noise, count, per_baseline)
     antennas = np.unique(np.concatenate([block["antennas"] for block in blocks]))
-    if model.size == 0 or not estimates or not np.any(model > 0) or not weight_sum > 0:
+    if from_model and (model.size == 0 or not np.any(model > 0)):
+        return None
+    if not estimates or not weight_sum > 0:
         return None
     noise_from = _least_raised(estimates)
     noise, _, per_baseline = estimates[noise_from]
+    if from_model:
+        signal = float(np.median(model))
+    else:
+        signal = _debiased_amplitude(blocks, noise)
+        if not signal > 0:
+            return None
     others = [(name, float(value[0])) for name, value in estimates.items() if name != noise_from]
     scan_lengths = [
         times[scans == scan].max() - times[scans == scan].min() + interval
         for scan in np.unique(scans)
     ]
     return VisibilitySample(
-        signal=float(np.median(model)),
+        signal=signal,
         noise=float(noise),
         nantennas=len(antennas),
         interval=interval,
@@ -392,19 +422,14 @@ def _block_starts(nrows: int, block_rows: int) -> list:
     return [int(start) for start in np.linspace(0, nrows - block_rows, BLOCKS)]
 
 
-def _read_block(selected, start: int, nrow: int) -> dict:
+def _read_block(selected, start: int, nrow: int, data_column: str, with_model: bool) -> dict:
     """
     The parallel hands (the first and last correlations) of a block of rows
     """
-    model = selected.getcol("MODEL_DATA", startrow=start, nrow=nrow)
-    data = selected.getcol(
-        "CORRECTED_DATA" if "CORRECTED_DATA" in selected.colnames() else "DATA",
-        startrow=start,
-        nrow=nrow
-    )
+    data = selected.getcol(data_column, startrow=start, nrow=nrow)
     flags = selected.getcol("FLAG", startrow=start, nrow=nrow)
     sigma = selected.getcol("SIGMA", startrow=start, nrow=nrow)
-    hands = sorted({0, model.shape[0] - 1})
+    hands = sorted({0, data.shape[0] - 1})
     antenna1 = selected.getcol("ANTENNA1", startrow=start, nrow=nrow)
     antenna2 = selected.getcol("ANTENNA2", startrow=start, nrow=nrow)
     good = ~flags[hands]
@@ -412,8 +437,12 @@ def _read_block(selected, start: int, nrow: int) -> dict:
     # One weight per correlation and row, shared by its channels
     weights = selected.getcol("WEIGHT", startrow=start, nrow=nrow)[hands]
     unflagged_channels = good.sum(axis=1)
+    if with_model:
+        model = np.abs(selected.getcol("MODEL_DATA", startrow=start, nrow=nrow)[hands])[good]
+    else:
+        model = np.zeros(0)
     return {
-        "model": np.abs(model[hands])[good],
+        "model": model,
         "data": data[hands],
         "flags": flags[hands],
         "sigma": sigma[hands],
@@ -428,6 +457,29 @@ def _read_block(selected, start: int, nrow: int) -> dict:
         ),
         "rows": nrow,
     }
+
+
+def _debiased_amplitude(blocks: list, noise: float) -> float:
+    """
+    The median over baselines and spectral windows of a visibility's amplitude with the noise
+    taken out: sqrt(<|V|^2> - 2 noise^2), as |V|^2 of a visibility whose real and imaginary parts
+    each have noise ``noise`` is the signal's power plus 2 noise^2. 0 if no baseline has signal
+    """
+    power = {}
+    for block in blocks:
+        keys = block["baseline"] * 1000 + block["ddid"]
+        squares = np.abs(block["data"])**2
+        good = ~block["flags"]
+        for key in np.unique(keys):
+            rows = keys == key
+            values = squares[:, :, rows][good[:, :, rows]]
+            total, count = power.get(key, (0.0, 0))
+            power[key] = (total + float(values.sum()), count + values.size)
+    amplitudes = [
+        math.sqrt(max(total / count - 2 * noise**2, 0.0)) for total, count in power.values()
+        if count
+    ]
+    return float(np.median(amplitudes)) if amplitudes else 0.0
 
 
 def _differences(block: dict, interval: float) -> dict:

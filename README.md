@@ -162,8 +162,10 @@ wenuray validate recipe.toml    # builds the run and checks it, without touching
 wenuray run recipe.toml         # images, solves, applies and decides, round by round
 ```
 
-`wenuray init > recipe.toml` writes a generic recipe to start from, and
-`wenuray run recipe.toml --ms other.ms` runs the same procedure on another dataset.
+`wenuray init > recipe.toml` writes a generic recipe to start from;
+`wenuray suggest target.ms --imager tclean > recipe.toml` writes one derived from the data, each
+value with its reason; and `wenuray run recipe.toml --ms other.ms` runs the same procedure on
+another dataset.
 
 ### The same run in Python
 

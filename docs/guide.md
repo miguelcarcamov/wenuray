@@ -185,6 +185,7 @@ From the command line:
 
 ```bash
 wenuray init > recipe.toml                 # a generic recipe to start from
+wenuray suggest target.ms --imager tclean > recipe.toml   # a recipe from the data, with reasons
 wenuray validate recipe.toml               # builds the run and checks it, without touching the data
 wenuray show --defaults recipe.toml        # the resolved recipe: presets laid in, every value shown
 wenuray run recipe.toml --plots            # runs it, plotting the gain solutions
