@@ -183,7 +183,7 @@ class Selfcal:
     @classmethod
     def resume(
         cls, result: Union[SelfcalResult, str, os.PathLike], imager: Imager,
-        steps: Sequence[CalibrationStep], **options
+        steps: Sequence[ScheduleEntry], **options
     ) -> Selfcal:
         """
         Continues an earlier run: the same measurement set, with that run's accepted tables applied
@@ -396,6 +396,7 @@ class Selfcal:
         last accepted round left, and a Repeat looks at its last round before it plans the next.
         A rejected round ends the run, except within a Repeat, where it ends the repeat
         """
+        last = None
         for entry in self.steps:
             for step in entry.steps:
                 missing = self._missing_before(step, state)
@@ -403,30 +404,38 @@ class Selfcal:
                     logger.warning("The run stops before %s: %s", _describe(step), missing)
                     return
             if isinstance(entry, Repeat):
-                yield from self._repeat(entry, state)
+                last = yield from self._repeat(entry, state, last)
                 continue
-            yield self._plan(entry)
+            planned = self._plan(entry)
+            yield planned
             if not state.rounds[-1].accepted:
                 return
+            last = planned.step
 
-    def _repeat(self, entry: Repeat, state: _RunState) -> Iterator[_PlannedRound]:
+    def _repeat(self, entry: Repeat, state: _RunState,
+                previous: Optional[CalibrationStep]) -> Iterator[_PlannedRound]:
         """
         The rounds of a Repeat: its step at the shortest solint the data support, round after
-        round, for as long as the Repeat goes on (Repeat.ends_before, Repeat.ends_after)
+        round, for as long as the Repeat goes on (Repeat.ends_before, Repeat.ends_after). The
+        accepted step before the repeat, previous, counts as its last round when it is of the same
+        class, so that e.g. Phasecal("inf"), Repeat(Phasecal("auto")) doesn't solve at "inf" again.
+        Returns the last accepted step
         """
         described = "Repeat of {0}".format(_describe(entry.step))
-        last = None
+        last = previous if type(previous) is type(entry.step) else None
         while True:
             planned = self._plan(entry.step)
             reason = "" if planned.problem else entry.ends_before(last, planned.step)
             if reason:
                 logger.info("%s ends: %s", described, reason)
-                return
+                return previous
             yield planned
+            if state.rounds[-1].accepted:
+                previous = planned.step
             reason = entry.ends_after(state.rounds[-1], planned.step)
             if reason:
                 logger.info("%s ends: %s", described, reason)
-                return
+                return previous
             last = planned.step
 
     def _plan(self, step: CalibrationStep) -> _PlannedRound:
@@ -730,6 +739,7 @@ class Selfcal:
         return RoundRecord(
             index=index,
             step=_describe(step),
+            solint="" if step is None else step.casa_solint,
             caltable=caltable,
             image=result.restored,
             psnr=statistics.psnr,
@@ -767,7 +777,8 @@ class Selfcal:
             None,
             1.0,
             False, (reason, ),
-            predicted_snr=predicted_snr
+            predicted_snr=predicted_snr,
+            solint="" if step.is_auto else step.casa_solint
         )
 
 

@@ -64,6 +64,10 @@ class RoundRecord:
     solutions :
         How completely the round's gains were solved (#179): failed solutions, on which antennas,
         and intervals with too few antennas
+    solint :
+        The solint the round solved with, as gaincal took it: for a step with solint "auto", what
+        it resolved to (#66). Empty for the initial image, and for an "auto" the data couldn't
+        resolve
     """
     index: int
     step: str
@@ -85,6 +89,7 @@ class RoundRecord:
     gains: Optional[GainDiagnostics] = None
     findings: Tuple[str, ...] = ()
     solutions: Optional[SolutionCoverage] = None
+    solint: str = ""
 
     def __post_init__(self):
         if self.beam is not None:
@@ -195,6 +200,8 @@ class SelfcalResult:
                 "accepted": record.accepted,
                 "reasons": list(record.reasons),
             }
+            if record.solint:
+                entry["solint"] = record.solint
             if record.beam is not None:
                 entry["beam"] = list(record.beam)
             if record.data_flagged is not None:

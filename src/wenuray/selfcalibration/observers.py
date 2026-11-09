@@ -84,8 +84,8 @@ class LoggingObserver(SelfcalObserver):
             selfcal.planned_rounds or 0, time.monotonic(), None
         )
         logger.info(
-            "Self-calibration of %s: %d steps imaged with %s%s, output in %s", selfcal.ms,
-            len(selfcal.steps),
+            "Self-calibration of %s: %d schedule entries imaged with %s%s, output in %s",
+            selfcal.ms, len(selfcal.steps),
             type(selfcal.imager).__name__,
             ", after an initial stack of {0} tables".format(len(selfcal.initial_stack))
             if len(selfcal.initial_stack) else "", selfcal.output

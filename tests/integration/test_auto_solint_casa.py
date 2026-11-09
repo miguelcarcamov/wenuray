@@ -15,8 +15,8 @@ SOLVE = SolveOptions(refant="A0", minblperant=3)
 
 
 def resolved(result) -> list:
-    """The solints "auto" resolved to, round by round: "Phasecal('auto' -> '180s')" -> "180s" """
-    return [record.step.split("-> ")[1].strip("')") for record in result.rounds[1:]]
+    """The solints "auto" resolved to, round by round"""
+    return [record.solint for record in result.rounds[1:]]
 
 
 def run(tmp_path, noise):
@@ -49,3 +49,4 @@ def test_the_resolved_solints_are_recorded(tmp_path, noise):
     result = run(tmp_path, noise)
 
     assert all("'auto' -> " in record.step for record in result.rounds[1:])
+    assert all(record.solint for record in result.rounds[1:])

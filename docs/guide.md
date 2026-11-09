@@ -73,8 +73,8 @@ Round 3 AmpPhasecal('auto' -> '180s'): accepted
 
 The better model in round 2 supports 180 s, where round 1's supported 300 s. The repeat stops when
 the residual reaches the thermal noise, and the amplitude step's corrections are at their noise:
-on these data it wasn't needed. Each round records the solint it resolved to, e.g.
-`Phasecal('auto' -> '180s')`, so the same recipe on the same data takes the same decisions. In a
+on these data it wasn't needed. Each round records the solint it resolved to in its `solint`, and its step
+reads e.g. `Phasecal('auto' -> '180s')`, so the same recipe on the same data takes the same decisions. In a
 recipe:
 
 ```toml

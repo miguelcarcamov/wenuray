@@ -818,6 +818,7 @@ class TestRepeat:
             "", "Phasecal('auto' -> 'inf')", "Phasecal('auto' -> '120s')",
             "Phasecal('auto' -> '60s')", "Phasecal('int')"
         ]
+        assert [record.solint for record in result.rounds] == ["", "inf", "120s", "60s", "int"]
         assert all(record.accepted for record in result.rounds)
         assert SelfcalResult.from_toml(
             str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
@@ -845,6 +846,36 @@ class TestRepeat:
         ).run(observers=())
 
         assert len(result.rounds) - 1 == rounds
+
+    @pytest.mark.parametrize(
+        "solints, steps", [
+            (["inf"], ["", "Phasecal('inf')"]),
+            (["120s", "120s"], ["", "Phasecal('inf')", "Phasecal('auto' -> '120s')"]),
+        ]
+    )
+    def test_starts_shorter_than_the_same_step_before_it(self, casa, plan, caplog, solints, steps):
+        # Phasecal("inf") before the repeat counts as its last round, so "auto" resolving to "inf"
+        # again doesn't solve at "inf" twice
+        plan(solints)
+
+        with caplog.at_level(logging.INFO, logger="wenuray"):
+            result = Selfcal(
+                casa.ms, imager(1.0, 2.0, 3.0),
+                [Phasecal("inf"), Repeat(Phasecal("auto"))]
+            ).run(observers=())
+
+        assert self.steps(result) == steps
+        assert "not a solint at least 25% shorter than" in caplog.text
+
+    def test_a_step_of_another_class_before_it_doesnt_count(self, casa, plan):
+        plan(["inf", "inf"])
+
+        result = Selfcal(
+            casa.ms, imager(1.0, 2.0, 3.0),
+            [Phasecal("inf"), Repeat(AmpPhasecal("auto"))]
+        ).run(observers=())
+
+        assert self.steps(result) == ["", "Phasecal('inf')", "AmpPhasecal('auto' -> 'inf')"]
 
     def test_ends_at_one_integration(self, casa, plan):
         plan(["int"])
@@ -891,6 +922,7 @@ class TestRepeat:
         assert self.steps(result) == ["", "Phasecal('auto')"]
         assert not result.rounds[1].accepted
         assert "finds no solint that reaches minsnr" in result.rounds[1].reasons[0]
+        assert result.rounds[1].solint == ""
         assert not casa.gaincal.called
 
     def test_the_log_counts_rounds_without_a_total(self, casa, plan, caplog):

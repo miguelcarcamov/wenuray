@@ -222,6 +222,13 @@ class CalibrationStep(ScheduleEntry):
         """
         return dataclasses.replace(self, solint=solint)
 
+    @property
+    def casa_solint(self) -> str:
+        """
+        The solint as gaincal takes it, e.g. "60.0s" for 60.0; "auto" until it is resolved
+        """
+        return self.solint if isinstance(self.solint, str) else "{0}s".format(self.solint)
+
     @classmethod
     def default_acceptance(cls) -> AcceptancePolicy:
         """
@@ -266,11 +273,10 @@ class CalibrationStep(ScheduleEntry):
                     type(self).__name__
                 )
             )
-        solint = self.solint if isinstance(self.solint, str) else "{0}s".format(self.solint)
         return {
             **dataclasses.asdict(selection),
             **dataclasses.asdict(self.solve_options(options)),
-            "solint": solint,
+            "solint": self.casa_solint,
             "calmode": self.calmode,
             **self._extra_gaincal_kwargs(),
         }

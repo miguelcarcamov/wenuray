@@ -154,7 +154,7 @@ solint = "auto"
 imaging = { threshold = "0.025mJy" }
 ```
 
-Each round records the solint it took, e.g. `Phasecal('auto' -> '180s')`
+Each round records the solint it took in its `solint`, and names it in its step, e.g. `Phasecal('auto' -> '180s')`
 ([Solints from the data](https://wenuray.readthedocs.io/guide.html#solints-from-the-data)). Check it, then run it:
 
 ```bash
