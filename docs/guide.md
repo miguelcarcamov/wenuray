@@ -25,11 +25,78 @@
 - **Every accepted table stays applied.** Each solve pre-applies all accepted tables, each with its
   own `spwmap` (derived from `combine`) and `interp`.
 
+### Solints from the data
+
+`solint="auto"` lets the data choose (#66). When the round starts, Wenuray predicts the solution
+S/N against the model the last accepted round left (see below), and takes the shortest solint
+whose S/N reaches twice `minsnr`, so that most solutions stay above `minsnr` despite their own
+scatter. If no solint that short fits in a scan (or in the observation, with `combine="scan"`),
+it takes `"inf"` when that still reaches `minsnr`; if not even that does, the round doesn't run,
+and the log says why.
+
+gaincal cuts each scan into intervals from its start and leaves the rest as a last, shorter one:
+a 420 s solint on a 120-integration scan of 60 s gives 17 solutions of 7 integrations and one of
+
+1. A remainder of r integrations, in a solint sized for n, has an S/N of 2 · `minsnr` · √(r / n),
+below `minsnr` when r < n / 4, and calflag flags its data. So of the lengths from n to 2n
+integrations, `"auto"` takes the shortest that leaves the fewest integrations in such remainders
+across the scans: 8 integrations here, 15 solutions of 8. The log says when it lengthened the
+solint, and what share of the data still falls in a remainder too short, e.g. a scan of a single
+integration.
+
+`Repeat(Phasecal("auto"))` runs the step again, each round at a shorter solint than the last, as a
+better model raises the S/N. It ends when the gains are consistent with their noise, as shorter
+solints would only fit noise, when the data support no solint at least `min_shortening` (25% by
+default) shorter than the last round's, at one integration, or when a round is rejected. The
+supported solint shortens as the square of the S/N, so without that margin a model a few percent
+brighter would buy a whole round for a solint a few percent shorter; `min_shortening=0` asks only
+for a shorter one. Then the run goes on with the next entry: a rejection inside a repeat
+ends the repeat, not the run.
+
+```python
+steps = [Repeat(Phasecal("auto")), AmpPhasecal("auto")]
+```
+
+On simulated data with 1 Jy over 1 Jy of noise per visibility, this schedule ran:
+
+```text
+Round 1 Phasecal('auto' -> '300s'): accepted
+  gains      phase scatter 2.0 x noise: a correction
+  image      PSNR 54.5 (+127.7% on round 0), rms 16.1 mJy/beam (1.30 x thermal), model flux 1.18 Jy
+Round 2 Phasecal('auto' -> '180s'): accepted
+  gains      phase scatter 1.1 x noise: consistent with noise on 280 solutions
+  image      PSNR 77.6 (+42.3% on round 1), rms 12.1 mJy/beam (0.99 x thermal), model flux 1.088 Jy
+Repeat of Phasecal('auto') ends: its last round's gains are consistent with their noise
+Round 3 AmpPhasecal('auto' -> '180s'): accepted
+  gains      phase scatter 0.5 x noise: consistent with noise on 278 solutions; amplitude scatter 0.9 x noise: consistent with noise on 278 solutions
+```
+
+The better model in round 2 supports 180 s, where round 1's supported 300 s. The repeat stops when
+the residual reaches the thermal noise, and the amplitude step's corrections are at their noise:
+on these data it wasn't needed. Each round records the solint it resolved to in its `solint`, and its step
+reads e.g. `Phasecal('auto' -> '180s')`, so the same recipe on the same data takes the same decisions. In a
+recipe:
+
+```toml
+[[steps]]
+type = "repeat"
+step = { type = "phase", solint = "auto" }
+
+[[steps]]
+type = "ampphase"
+solint = "auto"
+```
+
+An amplitude step after a `Repeat` of phases needs at least one of its rounds accepted; if every
+one was rejected, the run stops before it, as no phase solution is there to build on.
+
 ## Each round
 
 - **Each solve is checked first.** Before `gaincal`, Wenuray predicts a solution's S/N for the
   step's solint and combine from the data: the median model amplitude over the noise of one
-  visibility, times √(N_ant − 1) · √(n_int · n_chan · n_pol). It warns when the prediction is
+  visibility, times √(N_ant − 1) · √(n_int · n_chan · n_pol). For a step that solves amplitudes,
+  it is that over √2, as gaincal's own S/N, the one `minsnr` is compared with, is: on the same
+  data, gaincal reports 75 for `calmode="p"` and 53 for `"ap"`. It warns when the prediction is
   below `minsnr`, giving the shortest solint that would reach it, and records it as
   `predicted_snr`.
 - **Amplitudes and the source's spectrum.** An amplitude step that solves per spectral window
@@ -235,7 +302,9 @@ reruns it on a fresh copy of the input. A run Wenuray can't write as a recipe, e
 
 - **`Selfcal`**: the self-calibration loop; `run()` returns a `SelfcalResult`, and `resume()`
   continues one.
-- **`Phasecal`, `Ampcal`, `AmpPhasecal`**: calibration steps.
+- **`Phasecal`, `Ampcal`, `AmpPhasecal`**: calibration steps, with a solint or `"auto"`.
+- **`Repeat(step, min_shortening=0.25)`**: a step run again at `"auto"` solints, each at least
+  `min_shortening` shorter than the last, until its gains are at the noise.
 - **Acceptance policies**: `PSNRImproves`, `EnoughAntennas`, `FluxNotLost`, `BeamStable`,
   `FlaggedFractionBelow`, `Check(name, predicate)` for your own, combined with `AllOf`/`AnyOf`.
 - **Observers**: `LoggingObserver` (the default) and `GainPlotObserver`, passed to `run()`.

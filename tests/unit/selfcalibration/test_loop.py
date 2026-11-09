@@ -21,7 +21,7 @@ from wenuray.selfcalibration.loop import Selfcal
 from wenuray.selfcalibration.observers import GainPlotObserver, SelfcalObserver
 from wenuray.selfcalibration.result import SelfcalResult
 from wenuray.selfcalibration.schedule import ScheduleError
-from wenuray.selfcalibration.steps import AmpPhasecal, Ampcal, Phasecal
+from wenuray.selfcalibration.steps import AmpPhasecal, Ampcal, Phasecal, Repeat
 
 
 @dataclasses.dataclass(frozen=True)
@@ -774,3 +774,161 @@ def test_a_spw_combined_table_has_no_missing_spectral_windows(casa, monkeypatch)
     ).run(observers=())
 
     assert result.rounds[1].solutions == casa.coverage
+
+
+class TestRepeat:
+    """
+    #66: Repeat(Phasecal("auto")) runs its step at shorter and shorter solints until the gains
+    are at their noise; a rejection there ends the repeat, not the run
+    """
+
+    @pytest.fixture
+    def plan(self, casa, monkeypatch):
+        """Sets the solints "auto" resolves to and the gains each round finds, in order."""
+        from wenuray.selfcalibration.diagnostics import GainDiagnostics
+        casa.sample = TestPredictedSolutionSNR.sample(0.05)
+
+        def plan(solints, gains=()):
+            solints, gains = iter(solints), iter(gains)
+            monkeypatch.setattr(
+                loop.preflight, "shortest_solint", lambda sample, step, options:
+                (next(solints), "the shortest solint whose S/N reaches 6")
+            )
+            monkeypatch.setattr(
+                loop, "gain_diagnostics",
+                lambda table, amplitude: GainDiagnostics(next(gains, 10.0), solutions=100)
+            )
+
+        return plan
+
+    @staticmethod
+    def steps(result):
+        return [record.step for record in result.rounds]
+
+    def test_shortens_until_the_gains_are_at_the_noise_then_goes_on(self, casa, plan):
+        # Phase scatter over noise 10, 10, then 1: on 100 solutions, 1 is noise
+        plan(["inf", "120s", "60s"], gains=[10.0, 10.0, 1.0, 10.0])
+
+        result = Selfcal(
+            casa.ms, imager(1.0, 2.0, 3.0, 4.0, 5.0),
+            [Repeat(Phasecal("auto")), Phasecal("int")]
+        ).run(observers=())
+
+        assert self.steps(result) == [
+            "", "Phasecal('auto' -> 'inf')", "Phasecal('auto' -> '120s')",
+            "Phasecal('auto' -> '60s')", "Phasecal('int')"
+        ]
+        assert [record.solint for record in result.rounds] == ["", "inf", "120s", "60s", "int"]
+        assert all(record.accepted for record in result.rounds)
+        assert SelfcalResult.from_toml(
+            str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
+        ) == result
+
+    def test_ends_when_the_data_support_no_shorter_solint(self, casa, plan, caplog):
+        plan(["120s", "120s"])
+
+        with caplog.at_level(logging.INFO, logger="wenuray"):
+            result = Selfcal(casa.ms, imager(1.0, 2.0),
+                             [Repeat(Phasecal("auto"))]).run(observers=())
+
+        assert self.steps(result) == ["", "Phasecal('auto' -> '120s')"]
+        assert "the data support '120s', not a solint at least 25% shorter than '120s'" \
+            in caplog.text
+
+    @pytest.mark.parametrize("min_shortening, rounds", [(0.25, 1), (0.0, 2)])
+    def test_each_round_must_be_shorter_by_min_shortening(self, casa, plan, min_shortening, rounds):
+        # 100 s is 17% shorter than 120 s
+        plan(["120s", "100s", "100s"])
+
+        result = Selfcal(
+            casa.ms, imager(1.0, 2.0, 3.0),
+            [Repeat(Phasecal("auto"), min_shortening=min_shortening)]
+        ).run(observers=())
+
+        assert len(result.rounds) - 1 == rounds
+
+    @pytest.mark.parametrize(
+        "solints, steps", [
+            (["inf"], ["", "Phasecal('inf')"]),
+            (["120s", "120s"], ["", "Phasecal('inf')", "Phasecal('auto' -> '120s')"]),
+        ]
+    )
+    def test_starts_shorter_than_the_same_step_before_it(self, casa, plan, caplog, solints, steps):
+        # Phasecal("inf") before the repeat counts as its last round, so "auto" resolving to "inf"
+        # again doesn't solve at "inf" twice
+        plan(solints)
+
+        with caplog.at_level(logging.INFO, logger="wenuray"):
+            result = Selfcal(
+                casa.ms, imager(1.0, 2.0, 3.0),
+                [Phasecal("inf"), Repeat(Phasecal("auto"))]
+            ).run(observers=())
+
+        assert self.steps(result) == steps
+        assert "not a solint at least 25% shorter than" in caplog.text
+
+    def test_a_step_of_another_class_before_it_doesnt_count(self, casa, plan):
+        plan(["inf", "inf"])
+
+        result = Selfcal(
+            casa.ms, imager(1.0, 2.0, 3.0),
+            [Phasecal("inf"), Repeat(AmpPhasecal("auto"))]
+        ).run(observers=())
+
+        assert self.steps(result) == ["", "Phasecal('inf')", "AmpPhasecal('auto' -> 'inf')"]
+
+    def test_ends_at_one_integration(self, casa, plan):
+        plan(["int"])
+
+        result = Selfcal(casa.ms, imager(1.0, 2.0), [Repeat(Phasecal("auto"))]).run(observers=())
+
+        assert self.steps(result) == ["", "Phasecal('auto' -> 'int')"]
+
+    def test_a_rejected_round_ends_the_repeat_and_the_run_goes_on(self, casa, plan):
+        plan(["inf", "60s"])
+
+        # Round 2 lowers the PSNR and is rejected; the accepted model is imaged again (2.0), and
+        # the next entry's round is judged against round 1
+        result = Selfcal(
+            casa.ms, imager(1.0, 2.0, 1.5, 2.0, 3.0),
+            [Repeat(Phasecal("auto")), Phasecal("int")]
+        ).run(observers=())
+
+        assert [record.accepted for record in result.rounds] == [True, True, False, True]
+        assert self.steps(result)[-1] == "Phasecal('int')"
+
+    def test_amplitudes_without_an_accepted_phase_solution_stop_the_run(self, casa, plan, caplog):
+        plan(["inf"])
+
+        with caplog.at_level(logging.WARNING):
+            result = Selfcal(
+                casa.ms, imager(1.0, 0.5, 1.0),
+                [Repeat(Phasecal("auto")), AmpPhasecal("inf")]
+            ).run(observers=())
+
+        assert [record.accepted for record in result.rounds] == [True, False]
+        assert "The run stops before AmpPhasecal('inf')" in caplog.text
+
+    def test_an_auto_solint_the_data_cant_support_ends_the_run(self, casa, monkeypatch):
+        casa.sample = TestPredictedSolutionSNR.sample(5.0)
+        monkeypatch.setattr(
+            loop.preflight, "shortest_solint", lambda sample, step, options:
+            (None, "S/N 1.2 over a whole scan is below minsnr 3")
+        )
+
+        result = Selfcal(casa.ms, imager(1.0),
+                         [Phasecal("auto"), Phasecal("int")]).run(observers=())
+
+        assert self.steps(result) == ["", "Phasecal('auto')"]
+        assert not result.rounds[1].accepted
+        assert "finds no solint that reaches minsnr" in result.rounds[1].reasons[0]
+        assert result.rounds[1].solint == ""
+        assert not casa.gaincal.called
+
+    def test_the_log_counts_rounds_without_a_total(self, casa, plan, caplog):
+        plan(["int"])
+
+        with caplog.at_level(logging.INFO, logger="wenuray"):
+            Selfcal(casa.ms, imager(1.0, 2.0), [Repeat(Phasecal("auto"))]).run()
+
+        assert "Round 1 Phasecal('auto' -> 'int'): accepted" in caplog.text

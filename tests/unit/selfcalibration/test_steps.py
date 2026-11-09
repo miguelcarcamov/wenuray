@@ -1,12 +1,14 @@
 """Calibration steps (#22): frozen dataclasses whose behaviour differs by class, not by calmode."""
 import dataclasses
 import math
+from types import SimpleNamespace
 
 import pytest
 
 from wenuray.config import Selection, SolveOptions
+from wenuray.selfcalibration.diagnostics import GainDiagnostics
 from wenuray.selfcalibration.steps import (
-    AmpPhasecal, Ampcal, CalibrationStep, Phasecal, Severity, _AmplitudeStep, solint_seconds
+    AmpPhasecal, Ampcal, CalibrationStep, Phasecal, Repeat, Severity, _AmplitudeStep, solint_seconds
 )
 
 
@@ -144,3 +146,77 @@ class TestLegacyCalls:
     def test_legacy_arguments_show_the_new_call(self, build):
         with pytest.raises(TypeError, match=r"Selfcal\(ms, imager, \[Phasecal"):
             build()
+
+
+class TestAutoSolint:
+    """#66: a solint resolved from the data when its round starts."""
+
+    def test_is_a_valid_solint_whose_length_is_unknown(self):
+        step = Phasecal("auto")
+
+        assert step.is_auto
+        assert math.isnan(step.solint_seconds)
+
+    def test_must_be_resolved_before_it_is_solved(self):
+        with pytest.raises(ValueError, match="resolved from the data"):
+            Phasecal("auto").gaincal_kwargs(SolveOptions(), Selection())
+
+    def test_resolves_to_a_step_with_the_same_options(self):
+        step = AmpPhasecal("auto", solve={"minsnr": 5.0})
+
+        assert step.with_solint("96s") == AmpPhasecal("96s", solve={"minsnr": 5.0})
+
+
+class TestRepeat:
+    """#66: a step repeated at shorter solints until its solutions are at the noise."""
+
+    def test_its_step_must_be_auto(self):
+        with pytest.raises(TypeError, match="must be 'auto'"):
+            Repeat(Phasecal("60s"))
+
+    def test_it_takes_a_calibration_step(self):
+        with pytest.raises(TypeError, match="takes a calibration step"):
+            Repeat("phase")
+
+    def test_runs_its_step(self):
+        assert Repeat(Phasecal("auto")).steps == (Phasecal("auto"), )
+
+    @pytest.mark.parametrize("value", [-0.1, 1.0, "a", True])
+    def test_min_shortening_is_a_fraction(self, value):
+        with pytest.raises(ValueError, match="min_shortening"):
+            Repeat(Phasecal("auto"), min_shortening=value)
+
+    @pytest.mark.parametrize(
+        "last, solint, goes_on",
+        [
+            (None, "inf", True),  # the first round
+            ("inf", "inf", False),
+            ("inf", "600s", True),
+            ("120s", "90s", True),  # 25% shorter
+            ("120s", "100s", False),  # 17%
+            ("60s", "int", True),
+        ]
+    )
+    def test_each_round_must_be_shorter_by_min_shortening(self, last, solint, goes_on):
+        repeat = Repeat(Phasecal("auto"))
+        previous = None if last is None else Phasecal(last)
+
+        assert (repeat.ends_before(previous, Phasecal(solint)) == "") is goes_on
+
+    @pytest.mark.parametrize(
+        "accepted, gains, solint, reason",
+        [
+            (False, None, "60s", "rejected"),
+            (True, GainDiagnostics(1.0, solutions=100), "60s", "consistent with their noise"),
+            (True, GainDiagnostics(10.0, 1.0, solutions=100), "60s", ""),  # phases still correct
+            (True, GainDiagnostics(10.0, solutions=100), "int", "one integration"),
+            (True, GainDiagnostics(1.0), "60s", ""),  # unknown without the count
+            (True, None, "60s", ""),
+        ]
+    )
+    def test_ends_after_a_round_for_its_reasons(self, accepted, gains, solint, reason):
+        record = SimpleNamespace(accepted=accepted, gains=gains)
+
+        ends = Repeat(Phasecal("auto")).ends_after(record, Phasecal(solint))
+
+        assert (reason in ends) if reason else ends == ""

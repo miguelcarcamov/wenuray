@@ -185,6 +185,9 @@ tutorial uses one channel per spectral window, and why its gains change faster t
 
 - **Slower or stronger errors**: change `phase_sigma` and `amp_sigma` in `gain_errors()`.
 - **A longer ladder**: once gains can be correlated in time (pyralysis#409), add `Phasecal("120s")`
-  between `inf` and `int`, and watch the corrections fall round by round.
+  between `inf` and `int`, and watch the corrections fall round by round. Or let the data choose:
+  `Repeat(Phasecal("auto"))` shortens the solint round by round until the corrections are at the
+  noise ([Solints from the data](guide.md#solints-from-the-data)). Here, with gains that change
+  every integration, it goes straight to `int`.
 - **Pyralysis as the imager**: set `type = "pyralysis"` in `[imager]`, with a mask (see
   [Imagers](imagers.md#pyralysis)).
