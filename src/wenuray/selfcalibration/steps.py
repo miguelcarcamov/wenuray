@@ -374,7 +374,11 @@ class Repeat(ScheduleEntry):
     """
     Runs a step again and again, each round at a shorter solint than the last, as long as the
     solutions still correct more than their noise (#66). The step's solint is "auto", so each
-    round takes the shortest solint the data support then, against the model the last round left.
+    round takes the shortest solint the data support then, against the model the last round left,
+    but no shorter than max_shortening allows: the solint comes down step by step, each round's
+    model better than the last for the next, shorter one. On ALMA data, a schedule from a scan
+    straight to one integration left the residual at 1.5 x thermal; one halving the solint each
+    round, at 1.1 x. A repeat with no step of its class before it starts at the longest solint.
 
     The repeat ends, and the run goes on with the next entry, when:
 
@@ -392,9 +396,14 @@ class Repeat(ScheduleEntry):
         most 3/4 of it. A better model raises the solution S/N, and the solint the data support
         shortens as the square of it, so a model a few percent brighter would otherwise buy a round,
         a whole imaging run, for a solint a few percent shorter. 0 only asks for a shorter one
+    max_shortening :
+        How much shorter each round's solint may be than the last, as a fraction: 0.5 means at
+        least half of it, halving the solint each round. 1 lets each round jump to the shortest
+        solint the data support, and a repeat with no step before it start there
     """
     step: CalibrationStep
     min_shortening: float = 0.25
+    max_shortening: float = 0.5
 
     def __post_init__(self):
         if not isinstance(self.step, CalibrationStep):
@@ -412,6 +421,26 @@ class Repeat(ScheduleEntry):
                     self.min_shortening
                 )
             )
+        if not isinstance(self.max_shortening, (int, float)) or isinstance(
+            self.max_shortening, bool
+        ) or not self.min_shortening < self.max_shortening <= 1.0:
+            raise ValueError(
+                "max_shortening is a fraction above min_shortening ({0!r}) and up to 1, not "
+                "{1!r}".format(self.min_shortening, self.max_shortening)
+            )
+
+    def window(self, last: Optional[CalibrationStep], longest: float) -> tuple:
+        """
+        The solints, in s, the round after last may take: (at least, at most). longest is what
+        "inf" means for these data. With no last round, the longest itself, unless max_shortening
+        is 1; with max_shortening 1, no bounds
+        """
+        if self.max_shortening >= 1.0:
+            return 0.0, math.inf
+        if last is None:
+            return longest, math.inf
+        seconds = min(last.solint_seconds, longest)
+        return (1.0 - self.max_shortening) * seconds, (1.0 - self.min_shortening) * seconds
 
     @classmethod
     def from_recipe(cls, table: Mapping) -> Repeat:

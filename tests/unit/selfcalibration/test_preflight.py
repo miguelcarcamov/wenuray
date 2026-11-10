@@ -292,6 +292,30 @@ class TestShortestSolint:
     def test_the_solint_follows_the_noise(self, noise, solint):
         assert self.resolve(noise) == solint
 
+    def test_a_repeats_window_keeps_it_from_shortening_too_fast(self):
+        from wenuray.selfcalibration.preflight import shortest_solint
+        # S/N 60 per integration supports one, but the repeat's last round was 300 s
+        solint, why = shortest_solint(
+            SAMPLE, Phasecal("auto"), SolveOptions(gaintype="G"), at_least=150.0, at_most=225.0
+        )
+
+        assert solint == "150s"
+        assert "15 integrations, the repeat's shortest step from its last round" in why
+
+    def test_a_window_from_the_longest_is_inf(self):
+        from wenuray.selfcalibration.preflight import shortest_solint
+        solint, why = shortest_solint(
+            SAMPLE, Phasecal("auto"), SolveOptions(gaintype="G"), at_least=600.0
+        )
+
+        assert solint == "inf" and "starts at the longest solint, a whole scan" in why
+
+    def test_the_window_caps_the_lengthening_for_short_remainders(self):
+        from wenuray.selfcalibration.preflight import _even_length
+        # A 45-integration scan: 40 leaves 5 (too short for minsnr), 45 leaves none
+        assert _even_length(40, [45]) == (45, 0)
+        assert _even_length(40, [45], start=40, ceiling=44) == (44, 1)
+
     def test_combining_scans_allows_solints_longer_than_a_scan(self):
         # 0.6 per integration: (6 / 0.6)^2 = 100 integrations, 1000 s, within the 3600 s span
         assert self.resolve(10.0, combine="scan") == "1000s"

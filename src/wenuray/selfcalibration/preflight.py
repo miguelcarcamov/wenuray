@@ -185,8 +185,21 @@ def predict(sample: VisibilitySample, step: CalibrationStep, options: SolveOptio
     return SolutionSNR(prediction, options.minsnr, advice)
 
 
-def shortest_solint(sample: VisibilitySample, step: CalibrationStep,
-                    options: SolveOptions) -> Tuple[Optional[str], str]:
+def longest_solint(sample: VisibilitySample, step: CalibrationStep, options: SolveOptions) -> float:
+    """
+    The longest solint the step's options allow, in s: a scan, or the observation when scans are
+    combined. What "inf" means for these data
+    """
+    return _solution_snr(sample, step.solve_options(options), step.solves_amplitude)[1]
+
+
+def shortest_solint(
+    sample: VisibilitySample,
+    step: CalibrationStep,
+    options: SolveOptions,
+    at_least: float = 0.0,
+    at_most: float = math.inf
+) -> Tuple[Optional[str], str]:
     """
     What solint="auto" resolves to (#66): the shortest solint whose predicted solution S/N reaches
     AUTO_SNR_FACTOR times the step's minsnr. The S/N grows as the square root of the integrations a
@@ -199,6 +212,10 @@ def shortest_solint(sample: VisibilitySample, step: CalibrationStep,
     / 4, and whose data calflag then flags. So of the lengths from n to 2 n integrations, the solint
     is the shortest that leaves the fewest integrations in such remainders across the scans
     (_even_length).
+
+    A Repeat bounds it, so that it shortens step by step (Repeat.max_shortening): at_least, in s,
+    keeps it from being shorter than a fraction of the last round's (at least the longest: "inf"),
+    and at_most keeps the lengthening that avoids short remainders below the round's ceiling.
 
     Returns
     -------
@@ -213,18 +230,35 @@ def shortest_solint(sample: VisibilitySample, step: CalibrationStep,
     needed = max(1, math.ceil(round((target / per_integration)**2, 9)))
     measure = "CASA's S/N, the antenna's over sqrt(2) for amplitude solutions, " \
         if step.solves_amplitude else ""
-    if needed == 1:
+    if at_least >= longest:
+        at_longest = snr(max(1, round(longest / sample.interval)))
+        if at_longest >= options.minsnr:
+            return "inf", "a repeat starts at the longest solint, a whole {0}: S/N {1:.1f}".format(
+                "observation" if "scan" in combine else "scan", at_longest
+            )
+        return None, "S/N {0:.1f} over a whole {1} is below minsnr {2:g}".format(
+            at_longest, "observation" if "scan" in combine else "scan", options.minsnr
+        )
+    bounded = max(needed, math.ceil(round(at_least / sample.interval, 9)))
+    if bounded == 1:
         return "int", "{0}S/N {1:.1f} in one integration reaches {2:g} (2 x minsnr)".format(
             measure, per_integration, target
         )
-    if needed * sample.interval <= longest:
+    if bounded * sample.interval <= longest:
         scans = _scan_integrations(sample, combine)
-        length, lost = _even_length(needed, scans)
+        ceiling = math.floor(round(at_most /
+                                   sample.interval, 9)) if math.isfinite(at_most) else None
+        length, lost = _even_length(needed, scans, start=bounded, ceiling=ceiling)
         why = "the shortest solint whose {0}S/N reaches {1:g} (2 x minsnr)".format(measure, target)
-        if length > needed:
+        if bounded > needed:
+            why = (
+                "{0} integrations, the repeat's shortest step from its last round; the S/N would "
+                "support {1}".format(bounded, needed)
+            )
+        if length > bounded:
             why += (
                 ", {0} integrations rather than {1}, so that fewer scans end in a solution too short "
-                "to reach minsnr".format(length, needed)
+                "to reach minsnr".format(length, bounded)
             )
         if lost:
             why += "; {0:.1%} of the integrations still do".format(lost / sum(scans))
@@ -251,13 +285,21 @@ def _scan_integrations(sample: VisibilitySample, combine: set) -> list:
     return [max(1, round(length / sample.interval)) for length in lengths]
 
 
-def _even_length(needed: int, scans: list) -> Tuple[int, int]:
+def _even_length(
+    needed: int,
+    scans: list,
+    start: Optional[int] = None,
+    ceiling: Optional[int] = None
+) -> Tuple[int, int]:
     """
-    The solint, in integrations from needed to 2 x needed, that leaves the fewest integrations in
-    solutions too short to reach minsnr, the shortest of those that tie, and how many it leaves.
-    A remainder of r integrations reaches minsnr when 4 r >= needed (AUTO_SNR_FACTOR = 2, and the
-    S/N grows as the square root of the integrations)
+    The solint, in integrations from start (needed by default) to 2 x start, and no more than
+    ceiling, that leaves the fewest integrations in solutions too short to reach minsnr, the
+    shortest of those that tie, and how many it leaves. A remainder of r integrations reaches
+    minsnr when 4 r >= needed (AUTO_SNR_FACTOR = 2, and the S/N grows as the square root of the
+    integrations)
     """
+    start = needed if start is None else start
+    last = 2 * start if ceiling is None else max(start, min(2 * start, ceiling))
 
     def lost(length: int) -> int:
         return sum(
@@ -265,7 +307,7 @@ def _even_length(needed: int, scans: list) -> Tuple[int, int]:
             if remainder and AUTO_SNR_FACTOR**2 * remainder < needed
         )
 
-    best = min(range(needed, 2 * needed + 1), key=lambda length: (lost(length), length))
+    best = min(range(start, last + 1), key=lambda length: (lost(length), length))
     return best, lost(best)
 
 

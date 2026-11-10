@@ -415,16 +415,17 @@ class Selfcal:
     def _repeat(self, entry: Repeat, state: _RunState,
                 previous: Optional[CalibrationStep]) -> Iterator[_PlannedRound]:
         """
-        The rounds of a Repeat: its step at the shortest solint the data support, round after
-        round, for as long as the Repeat goes on (Repeat.ends_before, Repeat.ends_after). The
-        accepted step before the repeat, previous, counts as its last round when it is of the same
-        class, so that e.g. Phasecal("inf"), Repeat(Phasecal("auto")) doesn't solve at "inf" again.
-        Returns the last accepted step
+        The rounds of a Repeat: its step at the shortest solint the data support within the
+        repeat's window from its last round (Repeat.window), round after round, for as long as the
+        Repeat goes on (Repeat.ends_before, Repeat.ends_after). The accepted step before the repeat,
+        previous, counts as its last round when it is of the same class, so that e.g.
+        Phasecal("inf"), Repeat(Phasecal("auto")) doesn't solve at "inf" again. Returns the last
+        accepted step
         """
         described = "Repeat of {0}".format(_describe(entry.step))
         last = previous if type(previous) is type(entry.step) else None
         while True:
-            planned = self._plan(entry.step)
+            planned = self._plan(entry.step, entry, last)
             reason = "" if planned.problem else entry.ends_before(last, planned.step)
             if reason:
                 logger.info("%s ends: %s", described, reason)
@@ -438,10 +439,15 @@ class Selfcal:
                 return previous
             last = planned.step
 
-    def _plan(self, step: CalibrationStep) -> _PlannedRound:
+    def _plan(
+        self,
+        step: CalibrationStep,
+        repeat: Optional[Repeat] = None,
+        last: Optional[CalibrationStep] = None
+    ) -> _PlannedRound:
         """
         The step's round, with an "auto" solint resolved from the data against the accepted model
-        in MODEL_DATA
+        in MODEL_DATA; within a repeat, within its window from its last round
         """
         if not step.is_auto:
             return _PlannedRound(step, _describe(step))
@@ -451,7 +457,13 @@ class Selfcal:
                 step, _describe(step),
                 "solint 'auto' needs a solution S/N estimate, and the data give none"
             )
-        solint, why = preflight.shortest_solint(sample, step, self.solve)
+        bounds = {}
+        if repeat is not None:
+            at_least, at_most = repeat.window(
+                last, preflight.longest_solint(sample, step, self.solve)
+            )
+            bounds = {"at_least": at_least, "at_most": at_most}
+        solint, why = preflight.shortest_solint(sample, step, self.solve, **bounds)
         if solint is None:
             return _PlannedRound(
                 step, _describe(step), "solint 'auto' finds no solint that reaches minsnr: " + why

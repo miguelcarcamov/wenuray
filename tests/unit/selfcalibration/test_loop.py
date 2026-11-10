@@ -1,6 +1,7 @@
 """The single self-calibration loop (#22c), with CASA replaced by mocks."""
 import dataclasses
 import logging
+import math
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -790,10 +791,13 @@ class TestRepeat:
 
         def plan(solints, gains=()):
             solints, gains = iter(solints), iter(gains)
-            monkeypatch.setattr(
-                loop.preflight, "shortest_solint", lambda sample, step, options:
-                (next(solints), "the shortest solint whose S/N reaches 6")
-            )
+            casa.windows = []
+
+            def shortest_solint(sample, step, options, at_least=0.0, at_most=float("inf")):
+                casa.windows.append((at_least, at_most))
+                return next(solints), "the shortest solint whose S/N reaches 6"
+
+            monkeypatch.setattr(loop.preflight, "shortest_solint", shortest_solint)
             monkeypatch.setattr(
                 loop, "gain_diagnostics",
                 lambda table, amplitude: GainDiagnostics(next(gains, 10.0), solutions=100)
@@ -823,6 +827,33 @@ class TestRepeat:
         assert SelfcalResult.from_toml(
             str(Path(casa.ms).with_suffix("")) + "_selfcal/selfcal.toml"
         ) == result
+
+    def test_halves_the_solint_round_by_round_from_a_scan(self, casa, plan):
+        # The sample's scans last 7200 s: a lone repeat starts there, then each round's solint is
+        # at least half the last and at most 3/4 of it
+        plan(["inf", "3600s", "1800s"], gains=[10.0, 10.0, 1.0])
+
+        result = Selfcal(casa.ms, imager(1.0, 2.0, 3.0, 4.0),
+                         [Repeat(Phasecal("auto"))]).run(observers=())
+
+        assert casa.windows == [(7200.0, math.inf), (3600.0, 5400.0), (1800.0, 2700.0)]
+        assert [record.solint for record in result.rounds[1:]] == ["inf", "3600s", "1800s"]
+
+    def test_after_the_same_step_it_halves_from_that_step(self, casa, plan):
+        plan(["3600s"], gains=[10.0, 1.0])
+
+        Selfcal(casa.ms, imager(1.0, 2.0, 3.0),
+                [Phasecal("inf"), Repeat(Phasecal("auto"))]).run(observers=())
+
+        assert casa.windows == [(3600.0, 5400.0)]
+
+    def test_max_shortening_1_lets_each_round_jump(self, casa, plan):
+        plan(["int"])
+
+        Selfcal(casa.ms, imager(1.0, 2.0),
+                [Repeat(Phasecal("auto"), max_shortening=1.0)]).run(observers=())
+
+        assert casa.windows == [(0.0, math.inf)]
 
     def test_ends_when_the_data_support_no_shorter_solint(self, casa, plan, caplog):
         plan(["120s", "120s"])

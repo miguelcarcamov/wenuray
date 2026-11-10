@@ -186,6 +186,32 @@ class TestRepeat:
         with pytest.raises(ValueError, match="min_shortening"):
             Repeat(Phasecal("auto"), min_shortening=value)
 
+    @pytest.mark.parametrize("value", [0.25, 0.1, 1.5, "a", True])
+    def test_max_shortening_is_a_fraction_above_min_shortening(self, value):
+        with pytest.raises(ValueError, match="max_shortening"):
+            Repeat(Phasecal("auto"), max_shortening=value)
+
+    @pytest.mark.parametrize(
+        "last, window",
+        [
+            (None, (600.0, math.inf)),  # a lone repeat starts at the longest, a scan here
+            ("inf", (300.0, 450.0)),  # "inf" is the scan: half of it, up to 3/4
+            ("120s", (60.0, 90.0)),
+            ("1200s", (300.0, 450.0)),  # longer than a scan counts as a scan
+        ]
+    )
+    def test_each_round_takes_at_least_half_the_last(self, last, window):
+        previous = None if last is None else Phasecal(last)
+
+        assert Repeat(Phasecal("auto")).window(previous, 600.0) == window
+
+    @pytest.mark.parametrize("last", [None, "inf", "120s"])
+    def test_max_shortening_1_sets_no_bounds(self, last):
+        repeat = Repeat(Phasecal("auto"), max_shortening=1.0)
+        previous = None if last is None else Phasecal(last)
+
+        assert repeat.window(previous, 600.0) == (0.0, math.inf)
+
     @pytest.mark.parametrize(
         "last, solint, goes_on",
         [

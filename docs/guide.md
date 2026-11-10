@@ -45,35 +45,56 @@ solint, and what share of the data still falls in a remainder too short, e.g. a 
 integration.
 
 `Repeat(Phasecal("auto"))` runs the step again, each round at a shorter solint than the last, as a
-better model raises the S/N. It ends when the gains are consistent with their noise, as shorter
-solints would only fit noise, when the data support no solint at least `min_shortening` (25% by
-default) shorter than the last round's, at one integration, or when a round is rejected. The
-supported solint shortens as the square of the S/N, so without that margin a model a few percent
-brighter would buy a whole round for a solint a few percent shorter; `min_shortening=0` asks only
-for a shorter one. Then the run goes on with the next entry: a rejection inside a repeat
-ends the repeat, not the run.
+better model raises the S/N. It comes down step by step: each round's solint is at least
+`1 - max_shortening` (half, by default) of the last, and a repeat with no step of its class before
+it starts at a whole scan. Each round's model is then better than the last for the next, shorter
+solint; on ALMA Band 7 data, jumping from a scan straight to one integration left the residual at
+1.5 x thermal, and halving the solint each round down to one integration, at 1.1 x.
+`max_shortening=1` lets each round take the shortest solint the data support.
+
+It ends when the gains are consistent with their noise, as shorter solints would only fit noise,
+when the data support no solint at least `min_shortening` (25% by default) shorter than the last
+round's, at one integration, or when a round is rejected. The supported solint shortens as the
+square of the S/N, so without that margin a model a few percent brighter would buy a whole round
+for a solint a few percent shorter; `min_shortening=0` asks only for a shorter one. Then the run
+goes on with the next entry: a rejection inside a repeat ends the repeat, not the run.
 
 ```python
 steps = [Repeat(Phasecal("auto")), AmpPhasecal("auto")]
 ```
 
-On simulated data with 1 Jy over 1 Jy of noise per visibility, this schedule ran:
+On `wenuray.testing`'s simulated data, one two-hour scan of 60 s integrations, this schedule ran:
 
-```text
-Round 1 Phasecal('auto' -> '300s'): accepted
-  gains      phase scatter 2.0 x noise: a correction
-  image      PSNR 54.5 (+127.7% on round 0), rms 16.1 mJy/beam (1.30 x thermal), model flux 1.18 Jy
-Round 2 Phasecal('auto' -> '180s'): accepted
-  gains      phase scatter 1.1 x noise: consistent with noise on 280 solutions
-  image      PSNR 77.6 (+42.3% on round 1), rms 12.1 mJy/beam (0.99 x thermal), model flux 1.088 Jy
-Repeat of Phasecal('auto') ends: its last round's gains are consistent with their noise
-Round 3 AmpPhasecal('auto' -> '180s'): accepted
-  gains      phase scatter 0.5 x noise: consistent with noise on 278 solutions; amplitude scatter 0.9 x noise: consistent with noise on 278 solutions
-```
+With 1 Jy over 1 Jy of noise per visibility:
 
-The better model in round 2 supports 180 s, where round 1's supported 300 s. The repeat stops when
-the residual reaches the thermal noise, and the amplitude step's corrections are at their noise:
-on these data it wasn't needed. Each round records the solint it resolved to in its `solint`, and its step
+| Round | Step | Phase scatter / noise | PSNR |
+| --- | --- | --- | --- |
+| 0 | initial image | | 23.9 |
+| 1 | `Phasecal('auto' -> 'inf')`, the scan | 5.6 | 50.6 |
+| 2 | `Phasecal('auto' -> '3600s')` | 3.3 | 66.6 |
+| 3 | `Phasecal('auto' -> '1800s')` | 1.8 | 76.4 |
+| 4 | `Phasecal('auto' -> '900s')`: at the noise, the repeat ends | 1.1 | 81.5 |
+| 5 | `AmpPhasecal('auto' -> '360s')` | 0.7 | 85.3 |
+
+With 1 Jy over 0.05 Jy:
+
+| Round | Step | Phase scatter / noise | PSNR |
+| --- | --- | --- | --- |
+| 0 | initial image | | 24.8 |
+| 1 | `Phasecal('auto' -> 'inf')`, the scan | 5.8 | 71.8 |
+| 2 | `Phasecal('auto' -> '3600s')` | 5.9 | 114.7 |
+| 3 | `Phasecal('auto' -> '1800s')` | 8.4 | 185.7 |
+| 4 | `Phasecal('auto' -> '900s')` | 6.1 | 375.7 |
+| 5 | `Phasecal('auto' -> '480s')` | 3.5 | 568.5 |
+| 6 | `Phasecal('auto' -> '240s')` | 1.9 | 674.4 |
+| 7 | `Phasecal('auto' -> '120s')`: at the noise, the repeat ends | 1.0 | 762.5 |
+| 8 | `AmpPhasecal('auto' -> 'int')` | 0.8 | 849.4 |
+
+Each round's better model supports a shorter solint, but the repeat comes down by halves, and it
+stops where the gains reach their noise: 900 s with the noisier data, 120 s with the cleaner, though
+there S/N alone would have allowed one integration from the first round. Jumping there at once
+(`max_shortening=1`) ended the cleaner run at a PSNR of 249 instead of 849: the shortest solints were
+solved against the initial model. Each round records the solint it resolved to in its `solint`, and its step
 reads e.g. `Phasecal('auto' -> '180s')`, so the same recipe on the same data takes the same decisions. In a
 recipe:
 
