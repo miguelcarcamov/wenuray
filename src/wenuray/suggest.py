@@ -67,7 +67,10 @@ class Antenna:
 @dataclass(frozen=True)
 class DataSummary:
     """
-    What the suggestion reads from a measurement set
+    What the suggestion reads from a measurement set.
+
+    It has 10 fields, over the design budget of about 8 (design.mdc). It is a record that only
+    read_summary builds, not a constructor users call, so it is kept flat rather than nested.
 
     Parameters
     ----------
