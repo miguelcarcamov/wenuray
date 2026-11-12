@@ -338,3 +338,20 @@ class TestShortestSolint:
         # Target 12 from 6 per integration: 4 integrations
         assert solint == "40s"
         assert "12 (2 x minsnr)" in why
+
+
+class TestAntennaFlagged:
+    """#190: each antenna's flagged fraction, from the blocks the sample reads"""
+
+    def test_counts_both_ends_of_each_baseline(self):
+        from wenuray.selfcalibration.preflight import _antenna_flagged
+
+        # Two hands, two channels, three rows: 0-1 all flagged, 0-2 half, 1-2 none
+        flags = np.zeros((2, 2, 3), dtype=bool)
+        flags[:, :, 0] = True
+        flags[0, :, 1] = True
+        block = {"flags": flags, "antenna1": np.array([0, 0, 1]), "antenna2": np.array([1, 2, 2])}
+
+        fractions = _antenna_flagged([block], 4)
+
+        assert fractions == pytest.approx((0.75, 0.5, 0.25, 1.0))

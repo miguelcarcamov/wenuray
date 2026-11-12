@@ -162,7 +162,10 @@ wenuray validate recipe.toml    # builds the run and checks it, without touching
 wenuray run recipe.toml         # images, solves, applies and decides, round by round
 ```
 
-`wenuray init > recipe.toml` writes a generic recipe to start from, and
+`wenuray init > recipe.toml` writes a generic recipe to start from;
+`wenuray suggest target.ms -o recipe.toml` writes one whose values come from the data, each with a
+comment saying why
+([A recipe from the data](https://wenuray.readthedocs.io/guide.html#a-recipe-from-the-data)); and
 `wenuray run recipe.toml --ms other.ms` runs the same procedure on another dataset.
 
 ### The same run in Python

@@ -83,6 +83,10 @@ A few choices, and why:
   (`int`), as fast as the errors change. Last, amplitudes and phases every integration, once the
   model is good.
 
+`wenuray suggest tutorial.ms` writes a recipe from the data alone, each value with the reason for it
+([A recipe from the data](guide.md#a-recipe-from-the-data)); it is a good start for data of your
+own.
+
 The same run in Python is
 [`selfcal.py`](https://github.com/miguelcarcamov/wenuray/blob/development/examples/simulated/selfcal.py);
 a test checks that the two build the same run.

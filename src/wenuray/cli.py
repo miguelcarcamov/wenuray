@@ -2,6 +2,7 @@
 The wenuray command (#36), a thin layer over the recipes of wenuray.recipe:
 
     wenuray init > selfcal.toml         a generic recipe to start from
+    wenuray suggest target.ms           a recipe with values derived from the data, each explained
     wenuray validate selfcal.toml       builds the run and checks it, without touching the data
     wenuray show selfcal.toml           the recipe with its presets laid in (--defaults: all values)
     wenuray run selfcal.toml            runs it
@@ -24,7 +25,8 @@ import tomli_w
 TEMPLATE = '''\
 # A Wenuray self-calibration recipe. Each table is a constructor and its keys are that class's
 # arguments; see https://github.com/miguelcarcamov/wenuray#the-same-run-as-a-toml-recipe
-# Paths are relative to this file.
+# Paths are relative to this file. `wenuray suggest target.ms` writes one with values derived from
+# the data instead, each with the reason for it.
 
 ms = "target.ms"               # the calibrated target data in DATA (split them first)
 # output = "target_selfcal"    # default: <ms name>_selfcal, next to the measurement set
@@ -107,6 +109,19 @@ def _parser() -> argparse.ArgumentParser:
     apply.add_argument("--applymode", default="calflag", help="applycal's applymode")
     init = commands.add_parser("init", help="write a generic recipe to start from")
     init.add_argument("-o", "--output", help="file to write instead of the standard output")
+    suggest = commands.add_parser(
+        "suggest",
+        help="write a recipe with values derived from the data, each explained",
+        description="write a recipe with values derived from the data, each with a comment "
+        "saying why; it reads the data only, and the solints stay \"auto\", resolved during the "
+        "run (#190)"
+    )
+    suggest.add_argument("ms", help="the measurement set, with the calibrated target data in DATA")
+    suggest.add_argument("-o", "--output", help="file to write instead of the standard output")
+    suggest.add_argument("--field", default="", help="the field, when the data hold several")
+    suggest.add_argument(
+        "--imager", default="tclean", choices=("tclean", "pyralysis"), help="the imager"
+    )
     return parser
 
 
@@ -236,7 +251,33 @@ def _init(args: argparse.Namespace) -> int:
     return 0
 
 
-COMMANDS = {"run": _run, "validate": _validate, "show": _show, "apply": _apply, "init": _init}
+def _suggest(args: argparse.Namespace) -> int:
+    from . import suggest
+
+    if args.output is not None and os.path.exists(args.output):
+        raise FileExistsError("{0} already exists".format(args.output))
+    if not os.path.isdir(args.ms):
+        raise FileNotFoundError("{0} is not a measurement set".format(args.ms))
+    _quiet_casa_notices()
+    summary = suggest.read_summary(args.ms, args.field)
+    if args.output is None:
+        sys.stdout.write(suggest.recipe_text(summary, args.imager, os.path.abspath(args.ms)))
+        return 0
+    directory = os.path.dirname(os.path.abspath(args.output))
+    text = suggest.recipe_text(summary, args.imager, os.path.relpath(args.ms, directory))
+    with open(args.output, "w") as file:
+        file.write(text)
+    return 0
+
+
+COMMANDS = {
+    "run": _run,
+    "validate": _validate,
+    "show": _show,
+    "apply": _apply,
+    "init": _init,
+    "suggest": _suggest
+}
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
