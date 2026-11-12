@@ -284,17 +284,24 @@ own, e.g. an acceptance policy, is named as `type = "package.module:Class"`. Pol
 
 `wenuray suggest target.ms -o recipe.toml` writes a recipe whose values come from the data, each
 with a comment saying why, so the decisions are visible, editable and kept before anything runs.
-It reads the data only and makes no image (`--imager pyralysis` for Pyralysis; `--field` when the
-data hold several fields):
+It reads the data only and makes no image:
 
-```toml
-[solve]                        # gaincal options shared by every step
-# 251 m from the array centre, 0.0% of its sampled data flagged: the best of 8 antennas by distance
-# and flagging
-refant = "A0"
-# closure amplitudes need 4 antennas, so each antenna's solution needs baselines to 3 others
-minblperant = 3
+```bash
+wenuray suggest target.ms -o recipe.toml                     # tclean
+wenuray suggest target.ms -o recipe.toml --imager pyralysis  # Pyralysis
+wenuray suggest target.ms --field 3C286                      # data with several fields; to the terminal
+wenuray validate recipe.toml && wenuray run recipe.toml
 ```
+
+On the [tutorial](tutorial.md)'s simulated ALMA observation, its solve options read:
+
+```{literalinclude} ../examples/simulated/suggested.toml
+:language: toml
+:start-at: "[solve]"
+:end-before: "[imager]"
+```
+
+The whole recipe is in the tutorial ([Or let Wenuray suggest one](tutorial.md#or-let-wenuray-suggest-one)).
 
 What it derives, and from what:
 

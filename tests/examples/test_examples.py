@@ -209,3 +209,19 @@ def test_each_recipe_builds_its_script_run(name, args, runs, casatasks_module, m
     from_recipe = Selfcal.from_toml(EXAMPLES / name / "recipe.toml")
 
     assert by_name(from_recipe) == by_name(runs[0].selfcal)
+
+
+def test_the_suggested_example_is_a_valid_recipe():
+    """#190: examples/simulated/suggested.toml, what `wenuray suggest` writes for the tutorial's
+    data, loads as a run, and its derived values keep their reasons"""
+    from wenuray.selfcalibration import Repeat
+
+    selfcal = Selfcal.from_toml(EXAMPLES / "simulated" / "suggested.toml")
+
+    assert selfcal.ms == str(EXAMPLES / "simulated" / "tutorial.ms")
+    assert selfcal.solve.refant == "A042"  # as the hand-written recipe's
+    assert selfcal.steps == (Phasecal("inf"), Repeat(Phasecal("auto")), AmpPhasecal("auto"))
+    lines = (EXAMPLES / "simulated" / "suggested.toml").read_text().splitlines()
+    for key in ("refant", "minblperant", "nsigma", "geometry"):
+        line = next(i for i, text in enumerate(lines) if text.startswith(key + " ="))
+        assert "#" in lines[line] or lines[line - 1].startswith("#"), key
