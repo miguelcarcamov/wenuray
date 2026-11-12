@@ -284,10 +284,11 @@ own, e.g. an acceptance policy, is named as `type = "package.module:Class"`. Pol
 
 `wenuray suggest target.ms -o recipe.toml` writes a recipe whose values come from the data, each
 with a comment saying why, so the decisions are visible, editable and kept before anything runs.
-It reads the data only and makes no image:
+By default it reads the data only and makes no image:
 
 ```bash
 wenuray suggest target.ms -o recipe.toml                     # tclean
+wenuray suggest target.ms -o recipe.toml --image             # a quick image decides the steps too
 wenuray suggest target.ms -o recipe.toml --imager pyralysis  # Pyralysis
 wenuray suggest target.ms --field 3C286                      # data with several fields; to the terminal
 wenuray validate recipe.toml && wenuray run recipe.toml
@@ -327,7 +328,41 @@ What it derives, and from what:
 - **Warnings** the data alone can give, e.g. weights that misstate the noise (#129).
 
 `combine = "spw"` isn't decided: whether one window's S/N is too low for short solints needs a
-model. With several windows a comment says so.
+model. With several windows a comment says so, unless `--image` gives it one.
+
+#### With a quick image
+
+`--image` makes one quick image to predict the solution S/N before anything runs, and decides
+from it what the data alone can't:
+
+- **The model.** tclean images `DATA` on the suggested grid with natural weighting, into a
+  temporary directory it deletes, and saves no model: the measurement set is left as it was.
+  Clean stops at the largest peak noise alone would reach over the image's independent beams,
+  `nsigma` = √(2 ln N), about 4.8 for 10⁵ beams, so noise peaks stay out of the model
+  ([#198](https://github.com/miguelcarcamov/wenuray/issues/198)). The threshold is relative to the
+  residual's robust rms, which holds the gain-error artefacts too: one near the thermal noise would
+  clean them into the model.
+- **The signal.** The model's visibilities are computed from its clean components on a sample of
+  the data's (u, v), and their median amplitude is the signal `S` of the
+  [pre-flight estimate](#each-round). Artefacts the model still holds scatter in phase, so the
+  median is the source's: 0.91 Jy for the 1 Jy source of `wenuray.testing`'s simulation.
+- **The amplitude step** stays if its predicted S/N (CASA's, the antenna's over √2) at solint
+  `"inf"` reaches twice minsnr, the margin `solint="auto"` asks for. Below that, even its longest
+  solint would leave many solutions flagged, and the step is left out.
+- **`combine = "spw"`** is set when one window's phase S/N at `"inf"` falls short of twice minsnr
+  and the windows combined give more.
+
+Each comment gives the numbers. On the tutorial's data:
+
+```{literalinclude} ../examples/simulated/suggested-image.toml
+:language: toml
+:lines: 4-6
+```
+
+```{literalinclude} ../examples/simulated/suggested-image.toml
+:language: toml
+:start-at: "# Amplitudes last"
+```
 
 ## Reproducing a run
 

@@ -168,6 +168,7 @@ why ([A recipe from the data](https://wenuray.readthedocs.io/guide.html#a-recipe
 
 ```bash
 wenuray suggest target.ms -o recipe.toml   # refant, grid, steps... derived from target.ms
+                                           # (--image: a quick image decides the steps too)
 wenuray validate recipe.toml               # check it, edit what you know better
 wenuray run recipe.toml
 ```

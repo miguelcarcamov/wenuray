@@ -6,10 +6,11 @@ import dataclasses
 import math
 import tomllib
 
+import numpy as np
 import pytest
 
 from wenuray import cli, suggest
-from wenuray.config import ImageGeometry
+from wenuray.config import ImageGeometry, SolveOptions
 from wenuray.imaging.backends import Pyralysis, Tclean
 from wenuray.selfcalibration import AmpPhasecal, Phasecal, Repeat, Selfcal
 from wenuray.selfcalibration.preflight import VisibilitySample
@@ -214,7 +215,9 @@ class TestCommand:
     def read(self, monkeypatch, tmp_path):
         (tmp_path / "target.ms").mkdir()
         monkeypatch.setattr(
-            suggest, "read_summary", lambda ms, field: dataclasses.replace(SUMMARY, ms=ms)
+            suggest,
+            "read_summary",
+            lambda ms, field, image=False: dataclasses.replace(SUMMARY, ms=ms)
         )
         return str(tmp_path / "target.ms")
 
@@ -239,6 +242,146 @@ class TestCommand:
         assert cli.main(["suggest", read, "-o", str(output)]) == 1
         assert "already exists" in capsys.readouterr().err
 
+    def test_image_asks_for_a_model(self, monkeypatch, tmp_path, capsys):
+        (tmp_path / "target.ms").mkdir()
+        asked = []
+        monkeypatch.setattr(
+            suggest,
+            "read_summary",
+            lambda ms, field, image=False: asked.append(image) or dataclasses.
+            replace(SUMMARY, ms=ms)
+        )
+
+        assert cli.main(["suggest", str(tmp_path / "target.ms"), "--image"]) == 0
+        assert asked == [True]
+
     def test_needs_a_measurement_set(self, tmp_path, capsys):
         assert cli.main(["suggest", str(tmp_path / "missing.ms")]) == 1
         assert "is not a measurement set" in capsys.readouterr().err
+
+
+# The S/N of SAMPLE's solutions at solint "inf" (10 integrations of a 600 s scan, 2 hands, 6
+# antennas) for a model signal S: (S / 0.05) sqrt(5) sqrt(10 x 2 x channels) = 200 S per channel,
+# over sqrt(2) for amplitudes; 2 x minsnr is 6
+def modelled(signal, spws=(0, )):
+    model = suggest.ModelEstimate(signal, 1.0, 12, 4.8, 1e5)
+    sample = dataclasses.replace(SAMPLE, channels=(1, ) * len(spws))
+    return dataclasses.replace(SUMMARY, spws=spws, sample=sample, model=model)
+
+
+class TestQuickModel:
+    """--image (#190): a quick model's S/N decides the amplitude step and combine"""
+
+    @pytest.mark.parametrize("beams, nsigma", [(1e5, math.sqrt(2 * math.log(1e5))), (50, 3.0)])
+    def test_cleans_to_the_noise_maximum(self, beams, nsigma):
+        assert suggest.noise_maximum(beams) == pytest.approx(nsigma)
+        assert suggest.noise_maximum(1e5) == pytest.approx(4.80, abs=0.01)
+
+    def test_counts_the_beams_from_the_grid(self):
+        geometry = ImageGeometry(imsize=(1000, 1000), cell="0.1arcsec", oversampling=2.5)
+
+        assert suggest.independent_beams(geometry) == pytest.approx(1e6 / (1.133 * 25))
+
+    def test_a_point_at_the_centre_has_its_flux_everywhere(self):
+        u, v = np.linspace(-1e5, 1e5, 50), np.linspace(3e4, -2e4, 50)
+
+        amplitudes = suggest.model_amplitudes(
+            np.array([0.7]), np.array([0.0]), np.array([0.0]), u, v
+        )
+
+        assert amplitudes == pytest.approx(np.full(50, 0.7))
+
+    def test_two_points_beat_in_batches(self, monkeypatch):
+        # Two 1 Jy points 1e-5 rad apart in l: |V| = 2 |cos(pi u 1e-5)|, the same in any batches
+        monkeypatch.setattr(suggest, "COMPONENT_BATCH", 1)
+        u, v = np.linspace(0, 1e5, 40), np.zeros(40)
+
+        amplitudes = suggest.model_amplitudes(
+            np.ones(2), np.array([-5e-6, 5e-6]), np.zeros(2), u, v
+        )
+
+        assert amplitudes == pytest.approx(2 * np.abs(np.cos(np.pi * u * 1e-5)))
+
+    @pytest.mark.parametrize(
+        "signal, included, words", [(0.1, True, "14.1 (CASA's"), (0.02, False, "2.8 (CASA's")]
+    )
+    def test_the_amplitude_step_needs_twice_minsnr(self, signal, included, words):
+        sample = dataclasses.replace(SAMPLE, signal=signal)
+
+        choice = suggest.amplitude_step(sample, SolveOptions())
+
+        assert choice.value is included and words in choice.why
+
+    @pytest.mark.parametrize(
+        "signal, spws, combine",
+        [
+            (0.1, 4, ""),  # 20 per window
+            (0.02, 4, "spw"),  # 4 per window, 8 combined
+            (0.005, 4, "spw"),  # 1 per window, 2 combined: still the best there is
+            (0.02, 1, ""),  # one window: nothing to combine
+        ]
+    )
+    def test_windows_are_combined_when_one_is_short(self, signal, spws, combine):
+        sample = dataclasses.replace(SAMPLE, signal=signal, channels=(1, ) * spws)
+
+        assert suggest.spw_combination(sample, SolveOptions()).value == combine
+
+    def test_a_faint_source_gets_combined_windows_and_no_amplitudes(self, tmp_path):
+        summary = modelled(0.02, spws=(0, 1, 2, 3))
+
+        run = loaded(tmp_path, recipe(summary))
+        text = recipe(summary)
+
+        assert run.solve.combine == "spw"
+        assert run.steps == (Phasecal("inf"), Repeat(Phasecal("auto")))
+        assert "the 4 windows combined give 8.0" in text
+        assert "No amplitude step: the amplitude solutions' predicted S/N" in text
+        assert "5.7 (CASA's" in text  # 400 x 0.02 / sqrt(2)
+
+    def test_a_bright_source_keeps_its_amplitudes(self, tmp_path):
+        summary = modelled(0.1, spws=(0, 1, 2, 3))
+
+        run = loaded(tmp_path, recipe(summary))
+
+        assert run.solve.combine == ""
+        assert run.steps[-1] == AmpPhasecal("auto")
+        assert "reaches 6 (2 x minsnr)" in recipe(summary)
+        assert "--image: a quick tclean model of DATA" in recipe(summary)
+
+    def test_no_emission_is_a_warning(self, tmp_path):
+        summary = dataclasses.replace(SUMMARY, model=suggest.ModelEstimate(0.0, 0.0, 0, 4.8, 1e5))
+
+        assert "found no emission above the noise's expected maximum" in recipe(summary)
+        assert loaded(tmp_path, recipe(summary)).steps[-1] == AmpPhasecal("auto")
+
+    def test_without_a_model_nothing_is_decided(self, tmp_path):
+        summary = dataclasses.replace(
+            SUMMARY, model_problem="it needs the grid, which couldn't be derived"
+        )
+
+        assert "no quick model was made: it needs the grid" in recipe(summary)
+        assert "the S/N isn't known without a model" in recipe(summary)
+
+
+class TestReadSummary:
+    """read_summary's CASA reads are integration-tested; here, what it does with a failed image"""
+
+    def test_a_failed_quick_image_is_a_problem_not_an_error(self, monkeypatch):
+        monkeypatch.setattr(suggest, "_field", lambda ms, field: "target")
+        monkeypatch.setattr(suggest, "get_spw_ids", lambda ms, spw: [0])
+        monkeypatch.setattr(suggest, "spws_with_unflagged_data", lambda ms, spws: [0])
+        monkeypatch.setattr(suggest.preflight, "read_sample", lambda ms, sel, model: SAMPLE)
+        monkeypatch.setattr(suggest, "_antennas", lambda ms, sample: ANTENNAS)
+        monkeypatch.setattr(
+            "wenuray.imaging.contract.resolve_geometry", lambda g, ms, sel: SUMMARY.geometry
+        )
+
+        def fail(ms, selection, geometry):
+            raise RuntimeError("tclean: no data selected")
+
+        monkeypatch.setattr(suggest, "estimate_model", fail)
+
+        summary = suggest.read_summary("target.ms", image=True)
+
+        assert summary.model is None
+        assert "tclean couldn't image the data: tclean: no data selected" in summary.model_problem
