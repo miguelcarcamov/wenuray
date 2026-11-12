@@ -2,7 +2,7 @@
 The wenuray command (#36), a thin layer over the recipes of wenuray.recipe:
 
     wenuray init > selfcal.toml         a generic recipe to start from
-    wenuray suggest target.ms           a recipe with values derived from the data, each explained
+    wenuray suggest target.ms           a recipe from the data, each value explained (--image too)
     wenuray validate selfcal.toml       builds the run and checks it, without touching the data
     wenuray show selfcal.toml           the recipe with its presets laid in (--defaults: all values)
     wenuray run selfcal.toml            runs it
@@ -121,6 +121,12 @@ def _parser() -> argparse.ArgumentParser:
     suggest.add_argument("--field", default="", help="the field, when the data hold several")
     suggest.add_argument(
         "--imager", default="tclean", choices=("tclean", "pyralysis"), help="the imager"
+    )
+    suggest.add_argument(
+        "--image",
+        action="store_true",
+        help="make one quick tclean image (the measurement set untouched) to predict the "
+        "solution S/N, and decide from it the amplitude step and whether to combine the spws"
     )
     return parser
 
@@ -259,7 +265,7 @@ def _suggest(args: argparse.Namespace) -> int:
     if not os.path.isdir(args.ms):
         raise FileNotFoundError("{0} is not a measurement set".format(args.ms))
     _quiet_casa_notices()
-    summary = suggest.read_summary(args.ms, args.field)
+    summary = suggest.read_summary(args.ms, args.field, args.image)
     if args.output is None:
         sys.stdout.write(suggest.recipe_text(summary, args.imager, os.path.abspath(args.ms)))
         return 0

@@ -12,7 +12,7 @@ repos:
     args: [--autofix, --no-sort]
     files: ^examples/
     # What `wenuray suggest` writes, kept as it writes it (#190)
-    exclude: ^examples/simulated/suggested\.toml$
+    exclude: ^examples/simulated/suggested(-image)?\.toml$
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v6.0.0

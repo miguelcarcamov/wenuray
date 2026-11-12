@@ -225,3 +225,15 @@ def test_the_suggested_example_is_a_valid_recipe():
     for key in ("refant", "minblperant", "nsigma", "geometry"):
         line = next(i for i, text in enumerate(lines) if text.startswith(key + " ="))
         assert "#" in lines[line] or lines[line - 1].startswith("#"), key
+
+
+def test_the_image_example_keeps_its_amplitude_step_and_why():
+    """#190: suggested-image.toml, `wenuray suggest --image` on the tutorial's data"""
+    path = EXAMPLES / "simulated" / "suggested-image.toml"
+
+    selfcal = Selfcal.from_toml(path)
+
+    assert selfcal.steps[-1] == AmpPhasecal("auto")
+    text = path.read_text()
+    assert "--image: a quick tclean model of DATA" in text
+    assert "reaches 6 (2 x minsnr)" in text

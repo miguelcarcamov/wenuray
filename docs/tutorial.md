@@ -109,6 +109,17 @@ the same 0.0153″ cell. It differs where the recipe uses what we know about the
   model: the S/N decides how short they get. The recipe above sets `int` because we know the
   simulated gains change every integration.
 
+`wenuray suggest tutorial.ms --image` adds one quick image, in 50 s here, and decides the amplitude
+step from the S/N it predicts
+([`suggested-image.toml`](https://github.com/miguelcarcamov/wenuray/blob/development/examples/simulated/suggested-image.toml)).
+This disk is bright enough. The amplitude solutions' predicted S/N over a scan is 120, well above
+the 6 they need, so the step stays:
+
+```{literalinclude} ../examples/simulated/suggested-image.toml
+:language: toml
+:start-at: "# Amplitudes last"
+```
+
 Start from the suggestion for data of your own, and change what you know better.
 
 The same run in Python is
