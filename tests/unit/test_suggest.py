@@ -187,7 +187,11 @@ class TestRecipe:
         assert run.imager.geometry.cell == "auto"
         assert "no dish diameter" in recipe(summary)
 
-    def test_pyralysis(self, tmp_path):
+    def test_pyralysis(self, tmp_path, monkeypatch):
+        # Building the imager checks Pyralysis's version in its worker; the recipe is what's tested
+        from wenuray.imaging.backends import pyralysis as backend
+        monkeypatch.setattr(backend, "_check", lambda options: None)
+
         run = loaded(tmp_path, recipe(imager="pyralysis"))
 
         assert isinstance(run.imager, Pyralysis)
