@@ -1,0 +1,45 @@
+# A Wenuray self-calibration recipe suggested from tutorial.ms by `wenuray suggest` (Wenuray
+# 1.2.2.dev3). Each value derived from the data says why. Check it with `wenuray validate`, then
+# `wenuray run` it. Paths are relative to this file.
+
+ms = "tutorial.ms"             # the calibrated target data in DATA
+
+[selection]                    # one selection for the solve, the apply and the imager
+field = "unnamed"              # the field self-calibrated
+spw = ""                       # every spectral window with data: 0
+
+[solve]                        # gaincal options shared by every step
+# 39 m from the array centre, 0.0% of its sampled data flagged: the best of 43 antennas by distance
+# and flagging
+refant = "A042"
+# closure amplitudes need 4 antennas, so each antenna's solution needs baselines to 3 others
+minblperant = 3
+minsnr = 3.0                   # gaincal's default; solint "auto" aims at twice it
+gaintype = "T"                 # one solution for both polarizations, with the S/N of both
+
+[imager]
+type = "tclean"                # or "pyralysis"
+niter = 1000
+# each round cleans to 3 x its residual rms, which approaches the thermal noise from the data,
+# 22.7 uJy/beam, as the gains improve
+nsigma = 3.0
+# the cell: the Nyquist cell over 2.5; the size: 2.5 primary-beam FWHMs (#67)
+geometry = { imsize = [2500, 2500], cell = "0.0153arcsec" }
+weighting = { weighting = "natural" } # the most sensitive: self-calibration needs the signal
+
+# A first phase solution per scan, against the initial model.
+[[steps]]
+type = "phase"
+solint = "inf"
+
+# The phases again, round by round, each at the shortest solint the S/N supports against the last
+# round's model, until the gains are at their noise (#66).
+[[steps]]
+type = "repeat"
+step = { type = "phase", solint = "auto" }
+
+# Amplitudes last: if the S/N can't support an amplitude solution, "auto" finds no solint and the
+# run ends there, with the phases kept.
+[[steps]]
+type = "ampphase"
+solint = "auto"

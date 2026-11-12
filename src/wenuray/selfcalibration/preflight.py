@@ -50,7 +50,7 @@ class VisibilitySample:
     Parameters
     ----------
     signal :
-        Median amplitude of the model visibilities, in Jy
+        Median amplitude of the model visibilities, in Jy; NaN when read without a model
     noise :
         Noise of the real or imaginary part of one visibility, in Jy, from the estimate named by
         noise_from (#153)
@@ -83,6 +83,9 @@ class VisibilitySample:
         The other estimate, (where from, noise), when both could be made
     scan_lengths :
         The duration of every selected scan, in s, which decides where solution intervals end
+    antenna_flagged :
+        For each antenna, by id, the flagged fraction of the parallel hands of its sampled
+        cross-correlations; 1 for an antenna with none in the sample (#190)
     """
     signal: float
     noise: float
@@ -98,6 +101,7 @@ class VisibilitySample:
     noise_from: str = "consecutive integrations"
     other_noise: Optional[Tuple[str, float]] = None
     scan_lengths: Tuple[float, ...] = ()
+    antenna_flagged: Tuple[float, ...] = ()
 
     @property
     def fractional_bandwidth(self) -> float:
@@ -299,11 +303,13 @@ def absorbed_spectrum(
     )
 
 
-def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
+def read_sample(ms: str, selection: Selection, model: bool = True) -> Optional[VisibilitySample]:
     """
     Reads what the estimate needs from the selected data (field and spectral windows; uvrange
     isn't applied). Returns None if the data can't support an estimate: no model, no unflagged
-    cross-correlations, or no consecutive integrations
+    cross-correlations, or no consecutive integrations. With model=False, MODEL_DATA isn't read and
+    the sample has no signal (NaN): the noise, the weights and the layout of the data, for what
+    needs no model, e.g. a recipe suggested before anything is imaged (#190)
     """
     ms_tool = ms_tool_factory()
     try:
@@ -316,7 +322,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
                             ("DATA_DESC_ID", indices["dd"])) if len(ids)
     ]
     with open_table(ms) as ms_table:
-        if "MODEL_DATA" not in ms_table.colnames():
+        if model and "MODEL_DATA" not in ms_table.colnames():
             return None
         selected = ms_table.query(query=" AND ".join(conditions))
         try:
@@ -330,7 +336,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
                 nbaselines = antenna_table.nrows() * (antenna_table.nrows() - 1) // 2
             block_rows = INTEGRATIONS_PER_BLOCK * nbaselines * len(ddids)
             blocks = [
-                _read_block(selected, start, min(block_rows, nrows - start))
+                _read_block(selected, start, min(block_rows, nrows - start), model)
                 for start in _block_starts(nrows, block_rows)
             ]
         finally:
@@ -340,12 +346,14 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
     with open_table(os.path.join(ms, "SPECTRAL_WINDOW")) as spw_table:
         all_channels = spw_table.getcol("NUM_CHAN")
         edges = [channel_edges(spw_table, spw) for spw in _selected_spws(indices, dd_spw, ddids)]
+    with open_table(os.path.join(ms, "ANTENNA")) as antenna_table:
+        nantenna_rows = antenna_table.nrows()
     channels = _selected_channels(indices, dd_spw, all_channels, ddids)
 
     weight_sum = sum(block["weights"][0] for block in blocks)
     weight_squares = sum(block["weights"][1] for block in blocks)
     sampled = sum(block["rows"] for block in blocks)
-    model = np.concatenate([block["model"] for block in blocks])
+    amplitudes = np.concatenate([block["model"] for block in blocks])
     estimates = {}
     for name, differenced in (
         ("consecutive integrations", lambda block: _differences(block, interval)),
@@ -359,7 +367,9 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         if noise is not None:
             estimates[name] = (noise, count, per_baseline)
     antennas = np.unique(np.concatenate([block["antennas"] for block in blocks]))
-    if model.size == 0 or not estimates or not np.any(model > 0) or not weight_sum > 0:
+    if model and (amplitudes.size == 0 or not np.any(amplitudes > 0)):
+        return None
+    if not estimates or not weight_sum > 0:
         return None
     noise_from = _least_raised(estimates)
     noise, _, per_baseline = estimates[noise_from]
@@ -369,7 +379,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         for scan in np.unique(scans)
     ]
     return VisibilitySample(
-        signal=float(np.median(model)),
+        signal=float(np.median(amplitudes)) if model else math.nan,
         noise=float(noise),
         nantennas=len(antennas),
         interval=interval,
@@ -383,6 +393,7 @@ def read_sample(ms: str, selection: Selection) -> Optional[VisibilitySample]:
         noise_from=noise_from,
         other_noise=others[0] if others else None,
         scan_lengths=tuple(float(length) for length in scan_lengths),
+        antenna_flagged=_antenna_flagged(blocks, nantenna_rows),
     )
 
 
@@ -392,11 +403,11 @@ def _block_starts(nrows: int, block_rows: int) -> list:
     return [int(start) for start in np.linspace(0, nrows - block_rows, BLOCKS)]
 
 
-def _read_block(selected, start: int, nrow: int) -> dict:
+def _read_block(selected, start: int, nrow: int, model: bool = True) -> dict:
     """
-    The parallel hands (the first and last correlations) of a block of rows
+    The parallel hands (the first and last correlations) of a block of rows; without model, no
+    model amplitudes
     """
-    model = selected.getcol("MODEL_DATA", startrow=start, nrow=nrow)
     data = selected.getcol(
         "CORRECTED_DATA" if "CORRECTED_DATA" in selected.colnames() else "DATA",
         startrow=start,
@@ -404,7 +415,7 @@ def _read_block(selected, start: int, nrow: int) -> dict:
     )
     flags = selected.getcol("FLAG", startrow=start, nrow=nrow)
     sigma = selected.getcol("SIGMA", startrow=start, nrow=nrow)
-    hands = sorted({0, model.shape[0] - 1})
+    hands = sorted({0, data.shape[0] - 1})
     antenna1 = selected.getcol("ANTENNA1", startrow=start, nrow=nrow)
     antenna2 = selected.getcol("ANTENNA2", startrow=start, nrow=nrow)
     good = ~flags[hands]
@@ -413,7 +424,10 @@ def _read_block(selected, start: int, nrow: int) -> dict:
     weights = selected.getcol("WEIGHT", startrow=start, nrow=nrow)[hands]
     unflagged_channels = good.sum(axis=1)
     return {
-        "model": np.abs(model[hands])[good],
+        "model": np.abs(selected.getcol("MODEL_DATA", startrow=start, nrow=nrow)[hands])[good]
+        if model else np.zeros(0),
+        "antenna1": antenna1,
+        "antenna2": antenna2,
         "data": data[hands],
         "flags": flags[hands],
         "sigma": sigma[hands],
@@ -428,6 +442,22 @@ def _read_block(selected, start: int, nrow: int) -> dict:
         ),
         "rows": nrow,
     }
+
+
+def _antenna_flagged(blocks: list, nantennas: int) -> Tuple[float, ...]:
+    """
+    The flagged fraction of each antenna's sampled cross-correlations, parallel hands, every
+    channel; 1 for an antenna the sample doesn't hold
+    """
+    flagged, total = np.zeros(nantennas), np.zeros(nantennas)
+    for block in blocks:
+        flags = block["flags"]
+        per_row, size = flags.sum(axis=(0, 1)), flags.shape[0] * flags.shape[1]
+        for antennas in (block["antenna1"], block["antenna2"]):
+            np.add.at(flagged, antennas, per_row)
+            np.add.at(total, antennas, size)
+    fraction = np.where(total > 0, flagged / np.maximum(total, 1), 1.0)
+    return tuple(float(value) for value in fraction)
 
 
 def _differences(block: dict, interval: float) -> dict:

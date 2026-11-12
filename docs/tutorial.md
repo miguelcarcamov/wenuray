@@ -83,6 +83,34 @@ A few choices, and why:
   (`int`), as fast as the errors change. Last, amplitudes and phases every integration, once the
   model is good.
 
+### Or let Wenuray suggest one
+
+`wenuray suggest` writes a recipe from the data alone, each value with the reason for it, before
+anything is imaged ([A recipe from the data](guide.md#a-recipe-from-the-data)):
+
+```bash
+wenuray suggest tutorial.ms -o suggested.toml
+wenuray validate suggested.toml
+```
+
+On the tutorial's data it writes
+[`suggested.toml`](https://github.com/miguelcarcamov/wenuray/blob/development/examples/simulated/suggested.toml):
+
+```{literalinclude} ../examples/simulated/suggested.toml
+:language: toml
+```
+
+It takes the same reference antenna as the recipe above, `A042`, 39 m from the array's centre, and
+the same 0.0153″ cell. It differs where the recipe uses what we know about the source:
+
+- **The image size.** It covers 2.5 primary-beam FWHMs, 2500 pixels, since it can't know where the
+  emission is. This disk fits in 256 pixels, which images faster and leaves less noise to clean.
+- **The solints.** The suggestion leaves them `"auto"`, resolved round by round against each
+  model: the S/N decides how short they get. The recipe above sets `int` because we know the
+  simulated gains change every integration.
+
+Start from the suggestion for data of your own, and change what you know better.
+
 The same run in Python is
 [`selfcal.py`](https://github.com/miguelcarcamov/wenuray/blob/development/examples/simulated/selfcal.py);
 a test checks that the two build the same run.

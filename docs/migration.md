@@ -45,6 +45,10 @@ result = Selfcal(
 split(vis=result.ms, outputvis="target_sc/selfcal.ms", datacolumn="corrected")
 ```
 
+Instead of translating a script, `wenuray suggest target.ms -o recipe.toml` writes a recipe with
+the reference antenna, the grid and the steps derived from the data, each explained
+([A recipe from the data](guide.md#a-recipe-from-the-data)).
+
 ## Self-calibration
 
 | snow < 1.0 | Wenuray 1.0 |

@@ -185,6 +185,7 @@ From the command line:
 
 ```bash
 wenuray init > recipe.toml                 # a generic recipe to start from
+wenuray suggest target.ms -o recipe.toml   # a recipe derived from the data, each value explained
 wenuray validate recipe.toml               # builds the run and checks it, without touching the data
 wenuray show --defaults recipe.toml        # the resolved recipe: presets laid in, every value shown
 wenuray run recipe.toml --plots            # runs it, plotting the gain solutions
@@ -278,6 +279,55 @@ settings your group shares: tables merge key by key and the recipe wins. Wenuray
 since its defaults come from theory or the data rather than from an instrument. A class of your
 own, e.g. an acceptance policy, is named as `type = "package.module:Class"`. Policies built with
 `Check(name, function)` can't be written to a recipe; make them a class.
+
+### A recipe from the data
+
+`wenuray suggest target.ms -o recipe.toml` writes a recipe whose values come from the data, each
+with a comment saying why, so the decisions are visible, editable and kept before anything runs.
+It reads the data only and makes no image:
+
+```bash
+wenuray suggest target.ms -o recipe.toml                     # tclean
+wenuray suggest target.ms -o recipe.toml --imager pyralysis  # Pyralysis
+wenuray suggest target.ms --field 3C286                      # data with several fields; to the terminal
+wenuray validate recipe.toml && wenuray run recipe.toml
+```
+
+On the [tutorial](tutorial.md)'s simulated ALMA observation, its solve options read:
+
+```{literalinclude} ../examples/simulated/suggested.toml
+:language: toml
+:start-at: "[solve]"
+:end-before: "[imager]"
+```
+
+The whole recipe is in the tutorial ([Or let Wenuray suggest one](tutorial.md#or-let-wenuray-suggest-one)).
+
+What it derives, and from what:
+
+- **The selection**: the field, and the spectral windows that hold unflagged data. Windows whose
+  data are all flagged are left out.
+- **The reference antenna** should be near the centre of the array, where its baselines are short
+  and its phases change least, and have little flagged data, so that it's in every solution. Each
+  antenna is ranked by its distance from the array centre (the median of the positions) and by
+  the flagged fraction of a sample of its data; the best sum of the two ranks wins, as in the ALMA
+  pipeline's `hif_refant`.
+- **`minblperant`**: an antenna's solution is constrained by closure when it has baselines to the
+  other antennas of a closure quantity: 2 for closure phases (3 antennas), 3 for closure
+  amplitudes (4 antennas), and never more than the other antennas with data.
+- **The grid**: the cell and the size `"auto"` would give (#67), written out.
+- **The imaging depth**: `nsigma = 3`, relative to each round's residual, with the thermal noise
+  from the data in a comment. While the gains are poor the residual is well above the thermal
+  noise; a fixed threshold near it would clean into the gain-error artefacts.
+- **The steps**: a phase solution per scan, then `Repeat(Phasecal("auto"))`, then
+  `AmpPhasecal("auto")`, as in [Solints from the data](#solints-from-the-data). Without a model the
+  solution S/N is unknown, so the solints stay `"auto"` and the run resolves them; the amplitude
+  step is last, so if the data can't support it the run ends there with the phases kept. With
+  fewer than 4 antennas there is no amplitude step: closure amplitudes need 4.
+- **Warnings** the data alone can give, e.g. weights that misstate the noise (#129).
+
+`combine = "spw"` isn't decided: whether one window's S/N is too low for short solints needs a
+model. With several windows a comment says so.
 
 ## Reproducing a run
 
