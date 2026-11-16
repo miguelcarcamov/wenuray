@@ -347,3 +347,13 @@ Wenuray is free software under the
 [GNU General Public License v3 or later](https://github.com/miguelcarcamov/wenuray/blob/development/LICENSE).
 It is built on [CASA](https://casa.nrao.edu/) (Common Astronomy Software Applications), developed
 by the National Radio Astronomy Observatory (NRAO).
+
+## Star history
+
+<a href="https://www.star-history.com/?repos=miguelcarcamov%2Fwenuray&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=miguelcarcamov/wenuray&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=miguelcarcamov/wenuray&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=miguelcarcamov/wenuray&type=date&legend=top-left" />
+ </picture>
+</a>
