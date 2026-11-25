@@ -11,11 +11,12 @@ Source lives in `src/wenuray/`: `selfcalibration/` (self-cal loop), `imaging/` (
 ## Agents, skills and hooks
 
 `AGENTS.md` is the guide for every agent tool: the workflow, labels, environment and gotchas.
-Skills live in `.cursor/skills/` and are linked from `.claude/skills/`, so Claude Code and Cursor
-read the same files (`feature-dev`, `bug-fix`, `pr-review`, `convention-review`, `verify-ab`,
-`staged-feature`, `qa-explorer`, `docs-maintainer`, `estimate-effort`). A `PreToolUse` hook in
-`.claude/settings.json` (`tools/hooks/block-protected-push.sh`) blocks pushes to `development` and
-`master`.
+Skills live in `.cursor/skills/` and are linked from `.claude/skills/`, so Claude Code, Cursor and
+opencode read the same files (`feature-dev`, `bug-fix`, `pr-review`, `convention-review`,
+`verify-ab`, `staged-feature`, `qa-explorer`, `docs-maintainer`, `estimate-effort`). A `PreToolUse`
+hook in `.claude/settings.json` (`tools/hooks/block-protected-push.sh`) blocks pushes to
+`development` and `master`; opencode gets the same guard from the permission rules in
+`.opencode/opencode.jsonc`. When one changes, change the other.
 
 ## Canonical conventions — read these first
 

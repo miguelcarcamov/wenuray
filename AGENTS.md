@@ -1,6 +1,6 @@
 # Agent-assisted development
 
-How AI agents (Claude Code, Cursor, Codex, Aider, ...) work on Wenuray
+How AI agents (Claude Code, Cursor, opencode, Codex, Aider, ...) work on Wenuray
 (`github.com/miguelcarcamov/wenuray`). Humans follow the same rules; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -9,10 +9,10 @@ How AI agents (Claude Code, Cursor, Codex, Aider, ...) work on Wenuray
 | Component | Location | Role |
 | --- | --- | --- |
 | Conventions | `.cursor/rules/*.mdc` ([README](.cursor/rules/README.md)), mirrored in `CONVENTIONS.md` | The rules every change follows |
-| Skills | `.cursor/skills/<name>/SKILL.md`; `.claude/skills/<name>` links to the same files | Playbooks for features, bugs, reviews, QA, docs, estimates |
-| Hook | `tools/hooks/block-protected-push.sh`, wired in `.cursor/hooks.json` and `.claude/settings.json` | Blocks pushes to `development` and `master` |
+| Skills | `.cursor/skills/<name>/SKILL.md`; `.claude/skills/<name>` links to the same files, which opencode reads too | Playbooks for features, bugs, reviews, QA, docs, estimates |
+| Hook | `tools/hooks/block-protected-push.sh`, wired in `.cursor/hooks.json` and `.claude/settings.json`; for opencode, permission rules in `.opencode/opencode.jsonc` | Blocks pushes to `development` and `master` (opencode: also force-pushes and `gh pr merge`) |
 | Templates | `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` | What an issue and a PR must say |
-| Tool entry points | `CLAUDE.md` (Claude Code), `.cursor/rules` (Cursor), `.aider.conf.yml` (Aider), this file (Codex and others) | Each points back here and to the rules |
+| Tool entry points | `CLAUDE.md` (Claude Code), `.cursor/rules` (Cursor), `.opencode/opencode.jsonc` (opencode: this file and `CONVENTIONS.md`), `.aider.conf.yml` (Aider), this file (Codex and others) | Each points back here and to the rules |
 
 The `.mdc` files are the source of truth. After editing one, run
 `python tools/sync_conventions.py` to regenerate `CONVENTIONS.md`; CI checks it.

@@ -3,6 +3,8 @@
 # a branch and a pull request. Used by Cursor (.cursor/hooks.json, beforeShellExecution) and by
 # Claude Code (.claude/settings.json, PreToolUse on Bash). Each sends the command in its own JSON:
 # Cursor as .command, Claude Code as .tool_input.command, and each reads the answer differently.
+# opencode has no such hook: .opencode/opencode.jsonc denies the same pushes with permission rules,
+# so a change here goes there too.
 set -euo pipefail
 
 input=$(cat)
