@@ -137,3 +137,6 @@ docs/api/
 
 # Personal agent settings
 .claude/settings.local.json
+# opencode: local work queues and plugin dependencies; .opencode/opencode.jsonc is shared
+.opencode/plans/
+.opencode/node_modules/

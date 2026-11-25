@@ -1,0 +1,23 @@
+{
+  // opencode reads AGENTS.md (the agent guide) by itself and the skills in .claude/skills, which
+  // link to .cursor/skills. This adds the rules and the guard Claude Code and Cursor get from
+  // their hook (tools/hooks/block-protected-push.sh), as permission rules: the last match wins.
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["CONVENTIONS.md"],
+  "permissions": [
+    // Changes go through a chg/ or fix/ branch and a pull request into development
+    { "action": "shell", "resource": "git push *development", "effect": "deny" },
+    { "action": "shell", "resource": "git push *development *", "effect": "deny" },
+    { "action": "shell", "resource": "git push *master", "effect": "deny" },
+    { "action": "shell", "resource": "git push *master *", "effect": "deny" },
+    // A push without a branch goes to the current one, which may be development or master
+    { "action": "shell", "resource": "git push", "effect": "ask" },
+    { "action": "shell", "resource": "git push origin", "effect": "ask" },
+    // Squash merges make rewritten history unnecessary
+    { "action": "shell", "resource": "git push *--force*", "effect": "deny" },
+    { "action": "shell", "resource": "git push *-f", "effect": "deny" },
+    { "action": "shell", "resource": "git push *-f *", "effect": "deny" },
+    // The maintainer merges
+    { "action": "shell", "resource": "gh pr merge *", "effect": "deny" }
+  ]
+}
