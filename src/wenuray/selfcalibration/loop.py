@@ -542,7 +542,9 @@ class Selfcal:
             state.thermal, data_flagged, predicted
         )
         record = replace(
-            record, step=planned.description, solutions=self._coverage(table, coverage)
+            record,
+            step=planned.description,
+            solutions=self._with_uncalibrated_spws(table, coverage)
         )
         findings += self._advise("after_round", RoundContext(record), observers)
         record = replace(record, findings=findings)
@@ -705,8 +707,8 @@ class Selfcal:
             step.solve_options(self.solve).minsnr
         )
 
-    def _coverage(self, table: CalTable,
-                  coverage: Optional[SolutionCoverage]) -> Optional[SolutionCoverage]:
+    def _with_uncalibrated_spws(self, table: CalTable,
+                                coverage: Optional[SolutionCoverage]) -> Optional[SolutionCoverage]:
         """
         How completely the step's table covers the data (#179): its solutions' coverage, plus, for
         a table solved per spectral window, the windows it has no solutions for. Those with
