@@ -72,6 +72,40 @@ def test_a_rejected_round_is_rolled_back(tmp_path):
     assert wenuray_flag_versions(ms) == []
 
 
+def test_a_round_whose_solutions_are_all_flagged_is_rejected(tmp_path):
+    """
+    #199: gaincal writes a table but flags every solution in it, because minsnr is above the S/N
+    the data support. Applying it (calflag) would flag the data those solutions cover, the imager
+    would then see an empty selection and break its contract; the round is rejected before
+    anything is applied, and the run ends with its record and the rounds accepted before it
+    """
+    ms = simulate_point_source_ms(str(tmp_path / "target.ms"))
+
+    result = Selfcal(
+        ms, IMAGER, [Phasecal("inf"), AmpPhasecal("int", solve={"minsnr": 60.0})], solve=SOLVE
+    ).run()
+
+    assert [record.accepted for record in result.rounds] == [True, True, False]
+    rejected = result.rounds[2]
+    assert rejected.reasons == ("gaincal flagged every solution", )
+    assert rejected.solutions.failed == rejected.solutions.solutions > 0
+    assert [os.path.basename(table.path) for table in result.stack] == ["round1_p.cal"]
+    assert result.final.index == 1
+    # The rejected round was never applied: the data keep their unflagged visibilities and the
+    # accepted model, and no flag version of the round is left behind
+    with open_table(ms) as ms_table:
+        assert not ms_table.getcol("FLAG").all()
+    assert model_column_problem(ms) == ""
+    assert wenuray_flag_versions(ms) == []
+    # The run wrote its record, the rejected round in it
+    written = SelfcalResult.from_toml(
+        os.path.join(os.path.dirname(result.final.image), "selfcal.toml")
+    )
+    assert [record.accepted for record in written.rounds] == [True, True, False]
+    assert written.rounds[2].reasons == rejected.reasons
+    assert written.rounds[2].solutions == rejected.solutions
+
+
 def test_gain_plots_are_written_next_to_the_tables(accepted):
     assert all(os.path.getsize(table.path + ".png") > 0 for table in accepted.stack)
 

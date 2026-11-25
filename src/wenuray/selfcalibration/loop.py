@@ -496,12 +496,23 @@ class Selfcal:
         predicted, findings = self._predict_snr(step, state.accepted_imager, observers)
         with _phase(observers, label + ": solving"):
             table = self._solve(step, state.stack, name)
+        # A table gaincal did not write, or wrote with every solution flagged, calibrates
+        # nothing: applycal (calflag) would flag the data the solutions cover, and the imager
+        # would then see an empty selection and break its contract (#199). Reject the round
+        # before applying anything: nothing was applied or imaged, so there is nothing to restore
+        coverage = None if table is None else self._solutions(step, table)
         if table is None:
-            # Nothing was applied or imaged, so there is nothing to restore
+            problem = "gaincal found no solutions"
+        elif coverage is not None and coverage.all_flagged:
+            problem = "gaincal flagged every solution"
+        else:
+            problem = ""
+        if problem:
             record = replace(
-                self._failed_record(index, step, "gaincal found no solutions", predicted),
+                self._failed_record(index, step, problem, predicted),
                 findings=findings,
-                step=planned.description
+                step=planned.description,
+                solutions=coverage
             )
             state.rounds.append(record)
             _notify(observers, "on_round", record)
@@ -530,7 +541,9 @@ class Selfcal:
             index, step, table.path, result, current, decision.accepted, decision.reasons,
             state.thermal, data_flagged, predicted
         )
-        record = replace(record, step=planned.description, solutions=self._coverage(step, table))
+        record = replace(
+            record, step=planned.description, solutions=self._coverage(table, coverage)
+        )
         findings += self._advise("after_round", RoundContext(record), observers)
         record = replace(record, findings=findings)
         state.rounds.append(record)
@@ -681,17 +694,25 @@ class Selfcal:
         )
         return CalTable(path, step.calmode, tuple(spwmap), self.apply.interp)
 
-    def _coverage(self, step: CalibrationStep, table: CalTable) -> Optional[SolutionCoverage]:
+    def _solutions(self, step: CalibrationStep, table: CalTable) -> Optional[SolutionCoverage]:
         """
-        How completely the step's table covers the data (#179): its failed solutions, and, for a
-        table solved per spectral window, the windows it has no solutions for. Those with
-        unflagged data in the selection stay uncalibrated; the others hold none, and CASA's
-        "no corresponding cal spws" about them is harmless
+        How completely the step's table was solved (#179), read once per round and before the
+        table is applied: its solutions, the ones gaincal flagged, and the intervals left with
+        too few antennas
         """
-        coverage = solution_coverage(
+        return solution_coverage(
             table.path, step.min_antennas,
             step.solve_options(self.solve).minsnr
         )
+
+    def _coverage(self, table: CalTable,
+                  coverage: Optional[SolutionCoverage]) -> Optional[SolutionCoverage]:
+        """
+        How completely the step's table covers the data (#179): its solutions' coverage, plus, for
+        a table solved per spectral window, the windows it has no solutions for. Those with
+        unflagged data in the selection stay uncalibrated; the others hold none, and CASA's
+        "no corresponding cal spws" about them is harmless
+        """
         if coverage is None or table.spwmap:
             return coverage
         missing = [
