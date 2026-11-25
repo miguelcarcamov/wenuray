@@ -134,6 +134,14 @@ class SolutionCoverage:
         for name in ("failed_antennas", "spws", "uncalibrated_spws", "empty_spws"):
             object.__setattr__(self, name, tuple(getattr(self, name)))
 
+    @property
+    def all_flagged(self) -> bool:
+        """
+        Whether gaincal flagged every solution, so that applying the table (calflag) flags the
+        data those solutions cover and leaves the imager nothing to image (#199)
+        """
+        return self.solutions > 0 and self.failed >= self.solutions
+
 
 def solution_coverage(caltable: str, min_antennas: int,
                       minsnr: float) -> Optional[SolutionCoverage]:

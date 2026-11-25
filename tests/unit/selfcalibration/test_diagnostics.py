@@ -195,6 +195,18 @@ class TestCoverage:
         # Two antennas per spectral window and time: fewer than the 3 phases need
         assert (coverage.intervals, coverage.short_intervals) == (6, 6)
 
+    def test_a_table_whose_solutions_are_all_flagged_calibrates_nothing(self):
+        """#199: applying it (calflag) would flag the data it covers, leaving nothing to image"""
+        flags, times, spws, antennas = coverage_columns()
+        assert cover(flags, times, spws, antennas, NAMES, 3, 3.0).all_flagged is False
+
+        flags[...] = True
+        assert cover(flags, times, spws, antennas, NAMES, 3, 3.0).all_flagged is True
+
+        # One surviving solution leaves the data it covers to calibrate
+        flags[..., 0] = False
+        assert cover(flags, times, spws, antennas, NAMES, 3, 3.0).all_flagged is False
+
 
 def test_coverage_is_read_back_from_its_record():
     from wenuray.selfcalibration.result import RoundRecord

@@ -227,6 +227,26 @@ def test_a_round_without_solutions_stops_the_run(casa):
     casa.applycal.assert_not_called()
 
 
+def test_a_round_whose_solutions_are_all_flagged_is_rejected(casa):
+    """
+    #199: a table gaincal flagged every solution of calibrates nothing. applycal (calflag) would
+    flag the data those solutions cover, and the imager would then see an empty selection, so the
+    round is rejected before anything is applied
+    """
+    from wenuray.selfcalibration.diagnostics import SolutionCoverage
+    casa.coverage = SolutionCoverage(8, 8, 1, 1, 3, 60.0, spws=(0, ))
+    fake = imager(1.0, 0.5, 1.0)
+
+    result = Selfcal(casa.ms, fake, [Phasecal("inf", solve={"minsnr": 60.0})]).run()
+
+    assert [record.accepted for record in result.rounds] == [True, False]
+    assert result.rounds[1].reasons == ("gaincal flagged every solution", )
+    assert result.rounds[1].solutions == casa.coverage
+    assert len(result.stack) == 0
+    casa.applycal.assert_not_called()
+    assert fake.calls == [("round0", 100)]  # the imager never sees the empty selection
+
+
 @pytest.mark.parametrize("combine, spwmap", [("spw", (1, 1, 1, 1)), ("", ())])
 def test_each_table_gets_its_own_spwmap(casa, monkeypatch, combine, spwmap):
     """Solutions combined over spws are stored under the lowest selected one (#26)."""
